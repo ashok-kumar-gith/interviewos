@@ -30,12 +30,40 @@ type NotificationTrigger interface {
 // stays decoupled from the notification module's concrete types.
 type NotificationStub struct{}
 
+// Snapshotter is the optional port the progress service uses to persist a daily
+// readiness snapshot (best-effort) after a task completion commits, so the
+// estimated-ready-date trend has history to project from (FR-ANALYTICS-008). It
+// is satisfied by *analytics.Service. The dependency is nil-safe and idempotent:
+// RecordSnapshot upserts per (user, day), so completing many tasks in a day never
+// creates duplicate rows, and a failure here must never fail the completion that
+// already committed.
+type Snapshotter interface {
+	RecordSnapshot(ctx context.Context, userID uuid.UUID) (SnapshotStub, error)
+}
+
+// SnapshotStub is the minimal shape the snapshotter returns; progress ignores
+// the contents and only cares that recording ran. Defined here so progress stays
+// decoupled from the analytics module's concrete types.
+type SnapshotStub struct{}
+
+// ProfileReader is the optional port the progress service uses to resolve the
+// user's IANA timezone so "today" (the Today view and dashboard plan-day) is
+// computed in the user's local day rather than server/UTC (FR-DASH-008). It is
+// nil-safe: a nil reader (or an unknown timezone) falls back to UTC.
+type ProfileReader interface {
+	// Timezone returns the user's IANA timezone name (e.g. "Asia/Kolkata"). An
+	// empty string is treated as UTC by the caller.
+	Timezone(ctx context.Context, userID uuid.UUID) (string, error)
+}
+
 // Service implements the progress/Today/dashboard use-cases. It orchestrates the
 // Repository and applies the readiness model (03-ARCHITECTURE.md §8.1, ADR D15).
 type Service struct {
 	repo     Repository
 	revision RevisionScheduler
 	notify   NotificationTrigger
+	snapshot Snapshotter
+	profiles ProfileReader
 	now      func() time.Time
 }
 
@@ -48,7 +76,13 @@ type ServiceConfig struct {
 	// Notify is the optional notification trigger invoked (best-effort) after a
 	// task completion to refresh the user's digest notifications. nil disables it.
 	Notify NotificationTrigger
-	Now    func() time.Time
+	// Snapshot is the optional readiness snapshotter invoked (best-effort) after a
+	// task completion to persist the user's daily readiness snapshot. nil disables it.
+	Snapshot Snapshotter
+	// Profiles is the optional profile reader used to resolve the user's timezone
+	// for the Today/dashboard plan-day lookup. nil falls back to UTC.
+	Profiles ProfileReader
+	Now      func() time.Time
 }
 
 // NewService constructs a Service.
@@ -57,30 +91,45 @@ func NewService(cfg ServiceConfig) *Service {
 	if nowFn == nil {
 		nowFn = time.Now
 	}
-	return &Service{repo: cfg.Repo, revision: cfg.Revision, notify: cfg.Notify, now: nowFn}
+	return &Service{
+		repo:     cfg.Repo,
+		revision: cfg.Revision,
+		notify:   cfg.Notify,
+		snapshot: cfg.Snapshot,
+		profiles: cfg.Profiles,
+		now:      nowFn,
+	}
 }
 
-// learningKinds are the task kinds that represent learning a content item and
-// therefore schedule a revision (study/read/watch). solve/mock/revise do not
-// create revisions (ADR / SRS §6.1 — only learning items are revised).
-var learningKinds = map[string]struct{}{
-	"study": {},
-	"read":  {},
-	"watch": {},
+// learningItemTypes are the content item types a learning task may target.
+var learningItemTypes = map[string]struct{}{
+	"topic":          {},
+	"subtopic":       {},
+	"design_problem": {},
+	"lld_problem":    {},
+	"problem":        {},
 }
 
-// isLearningTask reports whether a completed task should schedule a revision: a
-// learning kind on a schedulable content item type.
-func isLearningTask(kind, itemType string) bool {
-	if _, ok := learningKinds[kind]; !ok {
-		return false
+// isRevisableTask reports whether a completed task should schedule a
+// spaced-repetition revision item. Two cases qualify (SRS §6.1, FR-ROAD-011):
+//   - a learning kind (study/read/watch) on a content item — the original case; and
+//   - a solve kind on a problem/lld_problem/design_problem — solving a problem is
+//     itself a learnable, revisable event (FR-ROAD-011).
+//
+// The revision scheduler is idempotent on (user, item_type, item_id), so a topic
+// that is both studied and solved yields a single revision item.
+func isRevisableTask(kind, itemType string) bool {
+	switch kind {
+	case "study", "read", "watch":
+		_, ok := learningItemTypes[itemType]
+		return ok
+	case "solve":
+		switch itemType {
+		case "problem", "lld_problem", "design_problem":
+			return true
+		}
 	}
-	switch itemType {
-	case "topic", "subtopic", "design_problem", "lld_problem", "problem":
-		return true
-	default:
-		return false
-	}
+	return false
 }
 
 // CompleteParams is the validated input to CompleteTask.
@@ -90,10 +139,11 @@ type CompleteParams struct {
 	Notes            string
 }
 
-// GetToday returns the user's plan-day for the current date (server-local UTC),
-// enriched with its tasks. Returns ErrPlanDayNotFound when none exists.
+// GetToday returns the user's plan-day for the current date — resolved in the
+// user's profile timezone (FR-DASH-008), falling back to UTC — enriched with its
+// tasks. Returns ErrPlanDayNotFound when none exists.
 func (s *Service) GetToday(ctx context.Context, userID uuid.UUID) (*PlanDayRow, error) {
-	return s.repo.GetPlanDay(ctx, userID, s.today())
+	return s.repo.GetPlanDay(ctx, userID, s.todayFor(ctx, userID))
 }
 
 // CompleteTask validates the payload and transactionally completes the task,
@@ -120,11 +170,12 @@ func (s *Service) CompleteTask(ctx context.Context, userID, taskID uuid.UUID, p 
 		return nil, Streak{}, err
 	}
 
-	// Schedule a spaced-repetition revision for completed LEARNING items only
-	// (study/read/watch on a content item). The scheduler is optional/idempotent
-	// (deduped on the active unique index), so a failure here must not fail the
-	// completion that already committed.
-	if s.revision != nil && isLearningTask(task.Kind, task.ItemType) {
+	// Schedule a spaced-repetition revision for completed revisable items:
+	// learning tasks (study/read/watch on a content item) AND solve tasks on a
+	// problem (FR-ROAD-011). The scheduler is optional/idempotent (deduped on the
+	// active unique index), so a failure here must not fail the completion that
+	// already committed.
+	if s.revision != nil && isRevisableTask(task.Kind, task.ItemType) {
 		if serr := s.revision.ScheduleForCompletion(ctx, userID, task.ItemType, task.ItemID.String(), task.PillarType); serr != nil {
 			return nil, Streak{}, serr
 		}
@@ -140,6 +191,13 @@ func (s *Service) CompleteTask(ctx context.Context, userID, taskID uuid.UUID, p 
 	// never spams; a failure must not fail the completion that already committed.
 	if s.notify != nil {
 		_, _ = s.notify.Generate(ctx, userID)
+	}
+
+	// Best-effort: persist today's readiness snapshot so the estimated-ready-date
+	// trend (FR-ANALYTICS-008) has history to project from. Idempotent per
+	// (user, day); a failure must not fail the completion that already committed.
+	if s.snapshot != nil {
+		_, _ = s.snapshot.RecordSnapshot(ctx, userID)
 	}
 
 	return task, streak, nil
@@ -215,9 +273,10 @@ func (s *Service) GetDashboard(ctx context.Context, userID uuid.UUID) (*Dashboar
 		overall = weightedSum / totalWeight
 	}
 
-	// Today counts.
-	today := TodaySummary{Date: s.today()}
-	if day, derr := s.repo.GetPlanDay(ctx, userID, s.today()); derr == nil {
+	// Today counts (resolved in the user's local timezone, FR-DASH-008).
+	todayDate := s.todayFor(ctx, userID)
+	today := TodaySummary{Date: todayDate}
+	if day, derr := s.repo.GetPlanDay(ctx, userID, todayDate); derr == nil {
 		var estMin, remainMin int
 		for _, t := range day.Tasks {
 			today.TotalTasks++
@@ -259,8 +318,28 @@ func estimatedReadinessDate(overall, threshold float64) *time.Time {
 	return nil
 }
 
+// today returns the current calendar day at UTC midnight (server default).
 func (s *Service) today() time.Time {
 	n := s.now().UTC()
+	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// todayFor returns the user's "today" — the calendar day at midnight in the
+// user's profile timezone (FR-DASH-008). It is nil-safe and defensive: a nil
+// profile reader, a lookup error, an empty timezone, or an unknown IANA name all
+// fall back to UTC, so the Today view never fails because of timezone data. The
+// returned time is expressed in UTC at the local day's midnight, matching how
+// plan_days.date (a DATE column) is compared.
+func (s *Service) todayFor(ctx context.Context, userID uuid.UUID) time.Time {
+	loc := time.UTC
+	if s.profiles != nil {
+		if tz, err := s.profiles.Timezone(ctx, userID); err == nil && tz != "" {
+			if l, lerr := time.LoadLocation(tz); lerr == nil {
+				loc = l
+			}
+		}
+	}
+	n := s.now().In(loc)
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
 }
 

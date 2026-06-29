@@ -50,12 +50,26 @@ type ReadinessReader interface {
 	LatestReadiness(ctx context.Context, userID uuid.UUID) (latest, previous float64, hasAny bool, err error)
 }
 
+// WeeklyReader exposes the facts the generator needs to build the once-per-week
+// weekly_review notification (FR-NOTIF-001): how many tasks the user completed
+// over the ISO week [weekStart, weekEnd] and the readiness delta across that
+// window (latest snapshot in-week minus the most recent snapshot before it).
+type WeeklyReader interface {
+	// WeeklySummary returns the count of tasks completed in [weekStart, weekEnd]
+	// (inclusive day bounds) and the readiness delta over the same window. The
+	// delta is the latest in-window snapshot's overall readiness minus the most
+	// recent snapshot strictly before weekStart; hasReadiness is false when no
+	// in-window snapshot exists (so the caller omits the delta).
+	WeeklySummary(ctx context.Context, userID uuid.UUID, weekStart, weekEnd time.Time) (tasksDone int, readinessDelta float64, hasReadiness bool, err error)
+}
+
 // --- gorm-backed implementations (query migration-owned tables directly) ---
 
 type gormReaders struct{ db *gorm.DB }
 
-// NewReaders returns gorm-backed PlanReader, RevisionReader, StreakReader and
-// ReadinessReader (all satisfied by one struct reading the underlying tables).
+// NewReaders returns gorm-backed PlanReader, RevisionReader, StreakReader,
+// ReadinessReader and WeeklyReader (all satisfied by one struct reading the
+// underlying tables).
 func NewReaders(db *gorm.DB) *gormReaders { return &gormReaders{db: db} }
 
 var (
@@ -63,6 +77,7 @@ var (
 	_ RevisionReader  = (*gormReaders)(nil)
 	_ StreakReader    = (*gormReaders)(nil)
 	_ ReadinessReader = (*gormReaders)(nil)
+	_ WeeklyReader    = (*gormReaders)(nil)
 )
 
 func (r *gormReaders) PlanDay(ctx context.Context, userID uuid.UUID, date time.Time) (*PlanDaySummary, error) {
@@ -183,6 +198,51 @@ func (r *gormReaders) LatestReadiness(ctx context.Context, userID uuid.UUID) (fl
 	default:
 		return vals[0], vals[1], true, nil
 	}
+}
+
+func (r *gormReaders) WeeklySummary(ctx context.Context, userID uuid.UUID, weekStart, weekEnd time.Time) (int, float64, bool, error) {
+	startStr := weekStart.UTC().Format("2006-01-02")
+	endStr := weekEnd.UTC().Format("2006-01-02")
+
+	// Tasks completed within the ISO week (by completed_at date).
+	var tasksDone int64
+	if err := r.db.WithContext(ctx).
+		Table("plan_tasks").
+		Where("user_id = ? AND deleted_at IS NULL AND status = 'completed'", userID).
+		Where("completed_at IS NOT NULL AND completed_at::date BETWEEN ? AND ?", startStr, endStr).
+		Count(&tasksDone).Error; err != nil {
+		return 0, 0, false, err
+	}
+
+	// Latest in-window readiness snapshot.
+	var latest []float64
+	if err := r.db.WithContext(ctx).
+		Table("readiness_snapshots").
+		Where("user_id = ? AND deleted_at IS NULL AND snapshot_date BETWEEN ? AND ?", userID, startStr, endStr).
+		Order("snapshot_date DESC").
+		Limit(1).
+		Pluck("overall_readiness", &latest).Error; err != nil {
+		return 0, 0, false, err
+	}
+	if len(latest) == 0 {
+		return int(tasksDone), 0, false, nil
+	}
+
+	// Most recent snapshot strictly before the week starts (the baseline).
+	var baseline []float64
+	if err := r.db.WithContext(ctx).
+		Table("readiness_snapshots").
+		Where("user_id = ? AND deleted_at IS NULL AND snapshot_date < ?", userID, startStr).
+		Order("snapshot_date DESC").
+		Limit(1).
+		Pluck("overall_readiness", &baseline).Error; err != nil {
+		return 0, 0, false, err
+	}
+	base := 0.0
+	if len(baseline) > 0 {
+		base = baseline[0]
+	}
+	return int(tasksDone), latest[0] - base, true, nil
 }
 
 func truncDay(t time.Time) time.Time {

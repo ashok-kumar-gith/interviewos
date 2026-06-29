@@ -52,6 +52,22 @@ func (f *fakeReadinessReader) LatestReadiness(_ context.Context, _ uuid.UUID) (f
 	return f.latest, f.previous, f.hasAny, f.err
 }
 
+type fakeWeeklyReader struct {
+	tasksDone    int
+	delta        float64
+	hasReadiness bool
+	err          error
+	calls        int
+	gotStart     time.Time
+	gotEnd       time.Time
+}
+
+func (f *fakeWeeklyReader) WeeklySummary(_ context.Context, _ uuid.UUID, weekStart, weekEnd time.Time) (int, float64, bool, error) {
+	f.calls++
+	f.gotStart, f.gotEnd = weekStart, weekEnd
+	return f.tasksDone, f.delta, f.hasReadiness, f.err
+}
+
 func fixedNow() func() time.Time {
 	t := time.Date(2026, 6, 29, 9, 0, 0, 0, time.UTC)
 	return func() time.Time { return t }
@@ -257,6 +273,65 @@ func TestGenerate_Idempotent_NoDuplicates(t *testing.T) {
 		_, ok := firstIDs[n.ID]
 		require.True(t, ok, "re-run returned a different row id")
 	}
+}
+
+func TestGenerate_WeeklyReview(t *testing.T) {
+	repo := newFakeRepo()
+	uid := uuid.New()
+	weekly := &fakeWeeklyReader{tasksDone: 7, delta: 12.5, hasReadiness: true}
+	gen := NewGenerator(GeneratorConfig{
+		Repo:   repo,
+		Weekly: weekly,
+		Now:    fixedNow(), // 2026-06-29 is a Monday → ISO 2026-W27
+	})
+
+	out, err := gen.Generate(context.Background(), uid)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, TypeWeeklyReview, out[0].Type)
+	require.NotNil(t, out[0].DedupKey)
+	require.Equal(t, "weekly_review:2026-W27", *out[0].DedupKey)
+	require.Contains(t, *out[0].Body, "7 tasks")
+	require.Contains(t, *out[0].Body, "+12.5")
+	require.EqualValues(t, 7, out[0].Payload["tasks_done"])
+
+	// ISO week bounds: Monday 2026-06-29 .. Sunday 2026-07-05.
+	require.Equal(t, "2026-06-29", weekly.gotStart.Format("2006-01-02"))
+	require.Equal(t, "2026-07-05", weekly.gotEnd.Format("2006-01-02"))
+}
+
+func TestGenerate_WeeklyReview_IdempotentPerWeek(t *testing.T) {
+	repo := newFakeRepo()
+	uid := uuid.New()
+	gen := NewGenerator(GeneratorConfig{
+		Repo:   repo,
+		Weekly: &fakeWeeklyReader{tasksDone: 3, hasReadiness: false},
+		Now:    fixedNow(),
+	})
+
+	first, err := gen.Generate(context.Background(), uid)
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Len(t, repo.items, 1)
+
+	// Re-run same ISO week: no duplicate row.
+	second, err := gen.Generate(context.Background(), uid)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Len(t, repo.items, 1, "weekly_review must dedup within the same ISO week")
+	require.Equal(t, first[0].ID, second[0].ID)
+}
+
+func TestGenerate_WeeklyReview_SkippedWhenNothingToReport(t *testing.T) {
+	repo := newFakeRepo()
+	gen := NewGenerator(GeneratorConfig{
+		Repo:   repo,
+		Weekly: &fakeWeeklyReader{tasksDone: 0, hasReadiness: false},
+		Now:    fixedNow(),
+	})
+	out, err := gen.Generate(context.Background(), uuid.New())
+	require.NoError(t, err)
+	require.Empty(t, out, "no weekly_review when no tasks and no readiness signal")
 }
 
 func TestGenerate_RequiresUserID(t *testing.T) {

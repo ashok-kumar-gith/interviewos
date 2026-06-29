@@ -167,6 +167,7 @@ func run() error {
 			Revisions: notifReaders,
 			Streaks:   notifReaders,
 			Readiness: notifReaders,
+			Weekly:    notifReaders,
 		})
 		registrars = append(registrars, notification.NewHandler(notification.HandlerConfig{
 			Service: notification.NewService(notification.ServiceConfig{
@@ -176,16 +177,28 @@ func run() error {
 			Tokens: tokens,
 		}))
 
+		// Analytics Engine. Built before progress so its RecordSnapshot can be
+		// injected as the progress module's best-effort daily snapshotter
+		// (FR-ANALYTICS-008): every task completion upserts the user's readiness
+		// snapshot (idempotent per user/day), giving the estimated-ready-date trend
+		// the history it projects from. The same service backs the /analytics routes.
+		analyticsSvc := analytics.NewService(analytics.ServiceConfig{Repo: analytics.NewRepository(db)})
+
 		// Progress / Today / Dashboard module. Owns task completion (transactional
 		// progress + session + streak upserts), the Today view, and the dashboard
 		// aggregate (readiness via the SRS multiplicative form, ADR D15). On
-		// learning-task completion it schedules a revision via revisionSvc and
-		// (best-effort) refreshes the user's digest notifications via notifGen.
+		// completion it schedules a revision via revisionSvc (learning items AND
+		// solved problems), refreshes the user's digest notifications via notifGen,
+		// and records the daily readiness snapshot via analyticsSvc — all
+		// best-effort. The Today view resolves "today" in the user's profile
+		// timezone (FR-DASH-008) via the profile reader.
 		registrars = append(registrars, progress.NewHandler(progress.HandlerConfig{
 			Service: progress.NewService(progress.ServiceConfig{
 				Repo:     progress.NewRepository(db),
 				Revision: revisionSvc,
 				Notify:   notificationTrigger{gen: notifGen},
+				Snapshot: snapshotter{svc: analyticsSvc},
+				Profiles: progress.NewProfileReader(db),
 			}),
 			Tokens: tokens,
 		}))
@@ -205,8 +218,9 @@ func run() error {
 		}))
 
 		// Analytics module (readiness, snapshots, weak/strong topics, time-spent).
+		// Reuses analyticsSvc built above (also the progress snapshotter).
 		registrars = append(registrars, analytics.NewHandler(analytics.HandlerConfig{
-			Service: analytics.NewService(analytics.ServiceConfig{Repo: analytics.NewRepository(db)}),
+			Service: analyticsSvc,
 			Tokens:  tokens,
 		}))
 
@@ -325,6 +339,22 @@ func (t notificationTrigger) Generate(ctx context.Context, userID uuid.UUID) ([]
 		return nil, err
 	}
 	return nil, nil
+}
+
+// snapshotter adapts *analytics.Service to progress's Snapshotter port: progress
+// only needs to know recording ran, so the returned snapshot is discarded and
+// reported as an empty stub. RecordSnapshot upserts per (user, day), so a
+// completion-triggered call is idempotent.
+type snapshotter struct{ svc *analytics.Service }
+
+func (s snapshotter) RecordSnapshot(ctx context.Context, userID uuid.UUID) (progress.SnapshotStub, error) {
+	if s.svc == nil {
+		return progress.SnapshotStub{}, nil
+	}
+	if _, err := s.svc.RecordSnapshot(ctx, userID); err != nil {
+		return progress.SnapshotStub{}, err
+	}
+	return progress.SnapshotStub{}, nil
 }
 
 // buildTokenManager constructs the shared JWT token manager from configuration.

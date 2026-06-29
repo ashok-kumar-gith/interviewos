@@ -132,3 +132,114 @@ func TestRepository_Integration(t *testing.T) {
 	require.Equal(t, rm2.ID, active2.ID)
 	require.Equal(t, int16(12), active2.HoursPerWeek)
 }
+
+// TestCreateGraph_RegenerationPreservesProgress exercises FR-CUR-010: a
+// regenerate must NOT delete user_topic_progress / user_problem_progress /
+// revision_items, and the freshly generated tasks whose item the user already
+// completed must be carried over to 'completed'.
+//
+// Requires migrations 000006_roadmap, 000011_progress, 000012_revision applied.
+func TestCreateGraph_RegenerationPreservesProgress(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set; skipping integration test")
+	}
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+
+	repo := NewRepository(tx)
+	ctx := context.Background()
+
+	userID := uuid.New()
+	require.NoError(t, tx.Exec(
+		`INSERT INTO users (id, email, role, status) VALUES (?, ?, 'user', 'active')`,
+		userID, "cur010+"+uuid.NewString()+"@example.com",
+	).Error)
+
+	start := time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC)
+	topicID := uuid.New()
+	problemID := uuid.New()
+
+	// User already mastered this topic and solved this problem (independent of
+	// any roadmap — these rows persist across regenerations).
+	require.NoError(t, tx.Exec(
+		`INSERT INTO user_topic_progress (user_id, topic_id, status, confidence, first_completed_at)
+		 VALUES (?, ?, 'completed', 4, now())`, userID, topicID).Error)
+	require.NoError(t, tx.Exec(
+		`INSERT INTO user_problem_progress (user_id, problem_id, status, confidence, solved, solved_at)
+		 VALUES (?, ?, 'completed', 5, true, now())`, userID, problemID).Error)
+	// A revision item for the topic (must survive regeneration).
+	require.NoError(t, tx.Exec(
+		`INSERT INTO revision_items (user_id, item_type, item_id, pillar_type, stage, interval_days, due_at, is_active)
+		 VALUES (?, 'topic', ?, 'dsa', 0, 1, ?, true)`, userID, topicID, start.AddDate(0, 0, 1)).Error)
+
+	mkRoadmap := func() *Roadmap {
+		return &Roadmap{
+			UserID: userID, TrackID: uuid.New(), ProfileID: uuid.New(),
+			StartDate: start, EndDate: start.AddDate(0, 0, 6), TotalWeeks: 1, HoursPerWeek: 10,
+			Status: "active", IsActive: true,
+			Weeks: []RoadmapWeek{{
+				WeekNumber: 1, StartDate: start, EndDate: start.AddDate(0, 0, 6),
+				FocusPillars: JSONStringArray{"dsa"}, PlannedHours: 8,
+				Days: []PlanDay{{
+					Date: start, PlannedMinutes: 90,
+					Tasks: []PlanTask{
+						{Kind: "study", ItemType: "topic", ItemID: topicID, PillarType: "dsa", Title: "Study: Arrays", EstimatedMinutes: 60, Priority: "high", Objectives: JSONStringArray{}, Status: "pending", SortOrder: 0},
+						{Kind: "solve", ItemType: "problem", ItemID: problemID, PillarType: "dsa", Title: "Solve: Two Sum", EstimatedMinutes: 30, Priority: "high", Objectives: JSONStringArray{}, Status: "pending", SortOrder: 1},
+					},
+				}},
+			}},
+		}
+	}
+
+	// First generation (not a regenerate): no carry-over, tasks stay pending.
+	rm := mkRoadmap()
+	require.NoError(t, repo.CreateGraph(ctx, rm, false))
+
+	count := func(table, where string, args ...any) int64 {
+		var c int64
+		require.NoError(t, tx.Table(table).Where(where, args...).Count(&c).Error)
+		return c
+	}
+
+	utpBefore := count("user_topic_progress", "user_id = ? AND deleted_at IS NULL", userID)
+	uppBefore := count("user_problem_progress", "user_id = ? AND deleted_at IS NULL", userID)
+	revBefore := count("revision_items", "user_id = ? AND deleted_at IS NULL", userID)
+	require.EqualValues(t, 1, utpBefore)
+	require.EqualValues(t, 1, uppBefore)
+	require.EqualValues(t, 1, revBefore)
+
+	// Regenerate: archives the old roadmap, builds fresh, and carries completed
+	// status forward onto the matching new tasks.
+	rm2 := mkRoadmap()
+	require.NoError(t, repo.CreateGraph(ctx, rm2, true))
+
+	// Progress + revision rows must be untouched (NOT deleted).
+	require.EqualValues(t, utpBefore, count("user_topic_progress", "user_id = ? AND deleted_at IS NULL", userID), "topic progress must survive regen")
+	require.EqualValues(t, uppBefore, count("user_problem_progress", "user_id = ? AND deleted_at IS NULL", userID), "problem progress must survive regen")
+	require.EqualValues(t, revBefore, count("revision_items", "user_id = ? AND deleted_at IS NULL", userID), "revision items must survive regen")
+
+	// New roadmap's matching tasks are carried over to completed. Query plan_tasks
+	// scoped to rm2's plan_days (GetPlanDay-by-date can't disambiguate the archived
+	// roadmap's plan-day on the same date).
+	var newTasks []PlanTask
+	require.NoError(t, tx.
+		Table("plan_tasks AS pt").
+		Joins("JOIN plan_days pd ON pd.id = pt.plan_day_id").
+		Joins("JOIN roadmap_weeks rw ON rw.id = pd.roadmap_week_id").
+		Where("rw.roadmap_id = ?", rm2.ID).
+		Order("pt.sort_order ASC").
+		Find(&newTasks).Error)
+	require.Len(t, newTasks, 2)
+	byItem := map[uuid.UUID]PlanTask{}
+	for _, tsk := range newTasks {
+		byItem[tsk.ItemID] = tsk
+	}
+	require.Equal(t, "completed", byItem[topicID].Status, "completed topic must carry over")
+	require.Equal(t, "completed", byItem[problemID].Status, "solved problem must carry over")
+	require.NotNil(t, byItem[topicID].CompletedAt)
+	require.NotNil(t, byItem[problemID].CompletedAt)
+}

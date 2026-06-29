@@ -2,6 +2,7 @@ package progress
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -318,9 +319,10 @@ func TestCompleteTask_SchedulesRevisionForLearningTask(t *testing.T) {
 	}
 }
 
-// TestCompleteTask_NoRevisionForSolveKind ensures non-learning kinds (solve)
-// do not schedule a revision.
-func TestCompleteTask_NoRevisionForSolveKind(t *testing.T) {
+// TestCompleteTask_SchedulesRevisionForSolveProblem verifies that completing a
+// SOLVE task on a problem schedules a revision item (FR-ROAD-011): solving a
+// problem is itself a revisable event.
+func TestCompleteTask_SchedulesRevisionForSolveProblem(t *testing.T) {
 	task := newTask()
 	task.Kind = "solve"
 	task.ItemType = "problem"
@@ -331,9 +333,123 @@ func TestCompleteTask_NoRevisionForSolveKind(t *testing.T) {
 	if _, _, err := svc.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 3, TimeSpentMinutes: 20}); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if sched.calls != 0 {
-		t.Fatalf("scheduler calls = %d, want 0 for solve kind", sched.calls)
+	if sched.calls != 1 {
+		t.Fatalf("scheduler calls = %d, want 1 for solve/problem", sched.calls)
 	}
+	if sched.itemType != "problem" || sched.itemID != task.ItemID.String() {
+		t.Fatalf("scheduler got %s/%s, want problem/%s", sched.itemType, sched.itemID, task.ItemID)
+	}
+}
+
+// TestCompleteTask_NoRevisionForMockKind ensures a non-revisable kind (mock) on a
+// topic does not schedule a revision.
+func TestCompleteTask_NoRevisionForMockKind(t *testing.T) {
+	task := newTask()
+	task.Kind = "mock"
+	task.ItemType = "topic"
+	repo := &fakeRepo{task: task}
+	sched := &fakeScheduler{}
+	svc := NewService(ServiceConfig{Repo: repo, Revision: sched, Now: fixedNow})
+
+	if _, _, err := svc.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 3, TimeSpentMinutes: 20}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if sched.calls != 0 {
+		t.Fatalf("scheduler calls = %d, want 0 for mock kind", sched.calls)
+	}
+}
+
+// fakeSnapshotter records RecordSnapshot calls.
+type fakeSnapshotter struct {
+	calls int
+	err   error
+}
+
+func (f *fakeSnapshotter) RecordSnapshot(_ context.Context, _ uuid.UUID) (SnapshotStub, error) {
+	f.calls++
+	return SnapshotStub{}, f.err
+}
+
+// TestCompleteTask_RecordsSnapshot verifies the daily readiness snapshot is
+// recorded (best-effort) on completion, and that a snapshotter error never fails
+// the completion that already committed.
+func TestCompleteTask_RecordsSnapshot(t *testing.T) {
+	task := newTask()
+	repo := &fakeRepo{task: task, streak: Streak{Current: 1, Longest: 1}}
+	snap := &fakeSnapshotter{}
+	svc := NewService(ServiceConfig{Repo: repo, Snapshot: snap, Now: fixedNow})
+
+	if _, _, err := svc.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 4, TimeSpentMinutes: 30}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if snap.calls != 1 {
+		t.Fatalf("snapshotter calls = %d, want 1", snap.calls)
+	}
+
+	// A snapshotter failure must not fail the completion.
+	snap2 := &fakeSnapshotter{err: errors.New("boom")}
+	svc2 := NewService(ServiceConfig{Repo: &fakeRepo{task: newTask()}, Snapshot: snap2, Now: fixedNow})
+	if _, _, err := svc2.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 4, TimeSpentMinutes: 30}); err != nil {
+		t.Fatalf("complete should not fail on snapshotter error: %v", err)
+	}
+}
+
+// fakeProfiles returns a fixed timezone for the timezone-resolution test.
+type fakeProfiles struct {
+	tz  string
+	err error
+}
+
+func (f *fakeProfiles) Timezone(_ context.Context, _ uuid.UUID) (string, error) {
+	return f.tz, f.err
+}
+
+// TestGetToday_ResolvesUserTimezone verifies the Today plan-day lookup resolves
+// "today" in the user's profile timezone (FR-DASH-008), not server UTC.
+func TestGetToday_ResolvesUserTimezone(t *testing.T) {
+	// 2026-06-29 22:30 UTC. In Asia/Kolkata (+05:30) that is 2026-06-30 04:00.
+	clock := func() time.Time { return time.Date(2026, 6, 29, 22, 30, 0, 0, time.UTC) }
+
+	// capturing repo records the date GetPlanDay was queried with.
+	cr := &captureRepo{}
+	svc := NewService(ServiceConfig{Repo: cr, Profiles: &fakeProfiles{tz: "Asia/Kolkata"}, Now: clock})
+	if _, err := svc.GetToday(context.Background(), uuid.New()); err != nil && err != ErrPlanDayNotFound {
+		t.Fatalf("get today: %v", err)
+	}
+	if got := cr.lastDate.Format("2006-01-02"); got != "2026-06-30" {
+		t.Fatalf("Kolkata today = %s, want 2026-06-30", got)
+	}
+
+	// No profile reader ⇒ UTC fallback (still 2026-06-29).
+	cr2 := &captureRepo{}
+	svc2 := NewService(ServiceConfig{Repo: cr2, Now: clock})
+	if _, err := svc2.GetToday(context.Background(), uuid.New()); err != nil && err != ErrPlanDayNotFound {
+		t.Fatalf("get today: %v", err)
+	}
+	if got := cr2.lastDate.Format("2006-01-02"); got != "2026-06-29" {
+		t.Fatalf("UTC today = %s, want 2026-06-29", got)
+	}
+
+	// Unknown timezone ⇒ UTC fallback.
+	cr3 := &captureRepo{}
+	svc3 := NewService(ServiceConfig{Repo: cr3, Profiles: &fakeProfiles{tz: "Not/AZone"}, Now: clock})
+	if _, err := svc3.GetToday(context.Background(), uuid.New()); err != nil && err != ErrPlanDayNotFound {
+		t.Fatalf("get today: %v", err)
+	}
+	if got := cr3.lastDate.Format("2006-01-02"); got != "2026-06-29" {
+		t.Fatalf("unknown-tz today = %s, want 2026-06-29 (UTC fallback)", got)
+	}
+}
+
+// captureRepo is a minimal Repository that records the date passed to GetPlanDay.
+type captureRepo struct {
+	fakeRepo
+	lastDate time.Time
+}
+
+func (c *captureRepo) GetPlanDay(_ context.Context, _ uuid.UUID, date time.Time) (*PlanDayRow, error) {
+	c.lastDate = date
+	return nil, ErrPlanDayNotFound
 }
 
 // TestCompleteTask_NilSchedulerIsSafe ensures progress works without a scheduler.
@@ -346,17 +462,27 @@ func TestCompleteTask_NilSchedulerIsSafe(t *testing.T) {
 	}
 }
 
-func TestIsLearningTask(t *testing.T) {
-	learn := [][2]string{{"study", "topic"}, {"read", "subtopic"}, {"watch", "design_problem"}, {"study", "lld_problem"}, {"study", "problem"}}
-	for _, c := range learn {
-		if !isLearningTask(c[0], c[1]) {
-			t.Fatalf("expected learning: %s/%s", c[0], c[1])
+func TestIsRevisableTask(t *testing.T) {
+	// Learning kinds on content items schedule a revision...
+	revisable := [][2]string{
+		{"study", "topic"}, {"read", "subtopic"}, {"watch", "design_problem"},
+		{"study", "lld_problem"}, {"study", "problem"},
+		// ...and solving a problem is itself revisable (FR-ROAD-011).
+		{"solve", "problem"}, {"solve", "lld_problem"}, {"solve", "design_problem"},
+	}
+	for _, c := range revisable {
+		if !isRevisableTask(c[0], c[1]) {
+			t.Fatalf("expected revisable: %s/%s", c[0], c[1])
 		}
 	}
-	notLearn := [][2]string{{"solve", "problem"}, {"mock", "topic"}, {"revise", "topic"}, {"study", "resource"}, {"study", "behavioral_story"}}
-	for _, c := range notLearn {
-		if isLearningTask(c[0], c[1]) {
-			t.Fatalf("expected non-learning: %s/%s", c[0], c[1])
+	notRevisable := [][2]string{
+		{"solve", "topic"}, // solving a "topic" is not a thing
+		{"mock", "topic"}, {"revise", "topic"},
+		{"study", "resource"}, {"study", "behavioral_story"},
+	}
+	for _, c := range notRevisable {
+		if isRevisableTask(c[0], c[1]) {
+			t.Fatalf("expected non-revisable: %s/%s", c[0], c[1])
 		}
 	}
 }

@@ -22,6 +22,7 @@ type Generator struct {
 	revisions RevisionReader
 	streaks   StreakReader
 	readiness ReadinessReader
+	weekly    WeeklyReader
 	now       func() time.Time
 }
 
@@ -34,6 +35,7 @@ type GeneratorConfig struct {
 	Revisions RevisionReader
 	Streaks   StreakReader
 	Readiness ReadinessReader
+	Weekly    WeeklyReader
 	Now       func() time.Time
 }
 
@@ -49,6 +51,7 @@ func NewGenerator(cfg GeneratorConfig) *Generator {
 		revisions: cfg.Revisions,
 		streaks:   cfg.Streaks,
 		readiness: cfg.Readiness,
+		weekly:    cfg.Weekly,
 		now:       nowFn,
 	}
 }
@@ -173,7 +176,68 @@ func (g *Generator) Generate(ctx context.Context, userID uuid.UUID) ([]Notificat
 		}
 	}
 
+	// weekly_review: a once-per-ISO-week digest summarizing the week's tasks and
+	// readiness movement (FR-NOTIF-001). The dedup_key embeds the ISO year+week so
+	// it fires at most once per calendar week and re-running the generator the
+	// same week is idempotent.
+	if g.weekly != nil {
+		isoYear, isoWeek := today.ISOWeek()
+		weekStart := isoWeekStart(today)
+		weekEnd := weekStart.AddDate(0, 0, 6)
+		tasksDone, delta, hasReadiness, err := g.weekly.WeeklySummary(ctx, userID, weekStart, weekEnd)
+		if err != nil {
+			return nil, err
+		}
+		// Only surface a review once there is something to report (any completed
+		// task or any readiness signal this week), so brand-new users aren't nagged.
+		if tasksDone > 0 || hasReadiness {
+			payload := map[string]any{
+				"iso_year":   isoYear,
+				"iso_week":   isoWeek,
+				"week_start": weekStart.Format("2006-01-02"),
+				"week_end":   weekEnd.Format("2006-01-02"),
+				"tasks_done": tasksDone,
+			}
+			body := fmt.Sprintf("You completed %d task%s this week.", tasksDone, plural(tasksDone))
+			if hasReadiness {
+				payload["readiness_delta"] = round1(delta)
+				body = fmt.Sprintf("%s Readiness %s%s pts.", body, signPrefix(delta), trimFloat(round1(absFloat(delta))))
+			}
+			n, err := g.upsert(ctx, userID, TypeWeeklyReview,
+				fmt.Sprintf("weekly_review:%04d-W%02d", isoYear, isoWeek),
+				fmt.Sprintf("Your week in review (W%02d)", isoWeek),
+				body, payload,
+			)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, *n)
+		}
+	}
+
 	return out, nil
+}
+
+// isoWeekStart returns the Monday (00:00 UTC) of the ISO week containing t.
+func isoWeekStart(t time.Time) time.Time {
+	t = truncDay(t.UTC())
+	// time.Weekday: Sunday=0..Saturday=6; ISO weeks start Monday.
+	offset := (int(t.Weekday()) + 6) % 7
+	return t.AddDate(0, 0, -offset)
+}
+
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func signPrefix(v float64) string {
+	if v < 0 {
+		return "-"
+	}
+	return "+"
 }
 
 // crossedMilestone reports the highest multiple of readinessMilestoneStep that

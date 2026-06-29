@@ -194,6 +194,90 @@ func (r *gormRepository) CreateGraph(ctx context.Context, rm *Roadmap, replaceAc
 				}
 			}
 		}
+
+		// FR-CUR-010: regeneration must preserve the user's hard-won progress.
+		// The user_topic_progress / user_problem_progress / revision_items rows are
+		// never deleted here (we only archive the prior roadmap above), so they
+		// survive untouched. Additionally, carry the *completed* status forward
+		// onto the freshly generated tasks so a re-roll doesn't reset items the
+		// user already mastered. We do this in-DB (set-based) so it scales and
+		// stays consistent within the same transaction.
+		if replaceActive {
+			if err := carryOverCompletedProgress(tx, rm.ID, rm.UserID); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
+}
+
+// carryOverCompletedProgress marks newly generated plan_tasks as completed when
+// the user already has a completed progress row for the same content item, so
+// regenerating a roadmap (FR-CUR-010) never discards mastered work. It copies
+// the prior confidence and completion timestamp where available. Matching is by
+// the polymorphic (item_type, item_id): topic/subtopic tasks match
+// user_topic_progress.topic_id; problem/lld_problem/design_problem tasks match
+// user_problem_progress.problem_id. Idempotent and safe to run once per regen.
+func carryOverCompletedProgress(tx *gorm.DB, roadmapID, userID uuid.UUID) error {
+	// Topics & subtopics ← user_topic_progress (status = 'completed'). The
+	// correlated subquery against user_topic_progress drives both the row filter
+	// and the carried-over confidence/timestamp, so plan_tasks need not appear in
+	// a FROM clause (Postgres forbids the target table there).
+	topicSQL := `
+UPDATE plan_tasks pt
+SET status = 'completed',
+    confidence = COALESCE((
+        SELECT utp.confidence FROM user_topic_progress utp
+        WHERE utp.user_id = pt.user_id AND utp.topic_id = pt.item_id AND utp.deleted_at IS NULL
+        ORDER BY utp.updated_at DESC LIMIT 1), pt.confidence),
+    completed_at = COALESCE((
+        SELECT COALESCE(utp.first_completed_at, utp.last_studied_at) FROM user_topic_progress utp
+        WHERE utp.user_id = pt.user_id AND utp.topic_id = pt.item_id AND utp.deleted_at IS NULL
+        ORDER BY utp.updated_at DESC LIMIT 1), now()),
+    updated_at = now()
+WHERE pt.user_id = ?
+  AND pt.deleted_at IS NULL
+  AND pt.status = 'pending'
+  AND pt.item_type IN ('topic','subtopic')
+  AND pt.plan_day_id IN (
+        SELECT pd.id FROM plan_days pd
+        JOIN roadmap_weeks rw ON rw.id = pd.roadmap_week_id
+        WHERE rw.roadmap_id = ?)
+  AND EXISTS (
+        SELECT 1 FROM user_topic_progress utp
+        WHERE utp.user_id = pt.user_id AND utp.topic_id = pt.item_id
+          AND utp.deleted_at IS NULL AND utp.status = 'completed')`
+	if err := tx.Exec(topicSQL, userID, roadmapID).Error; err != nil {
+		return err
+	}
+
+	// Problems (DSA/LLD/HLD) ← user_problem_progress (solved OR status completed).
+	problemSQL := `
+UPDATE plan_tasks pt
+SET status = 'completed',
+    confidence = COALESCE((
+        SELECT upp.confidence FROM user_problem_progress upp
+        WHERE upp.user_id = pt.user_id AND upp.problem_id = pt.item_id AND upp.deleted_at IS NULL
+        ORDER BY upp.updated_at DESC LIMIT 1), pt.confidence),
+    completed_at = COALESCE((
+        SELECT COALESCE(upp.solved_at, upp.last_attempt_at) FROM user_problem_progress upp
+        WHERE upp.user_id = pt.user_id AND upp.problem_id = pt.item_id AND upp.deleted_at IS NULL
+        ORDER BY upp.updated_at DESC LIMIT 1), now()),
+    updated_at = now()
+WHERE pt.user_id = ?
+  AND pt.deleted_at IS NULL
+  AND pt.status = 'pending'
+  AND pt.item_type IN ('problem','lld_problem','design_problem')
+  AND pt.plan_day_id IN (
+        SELECT pd.id FROM plan_days pd
+        JOIN roadmap_weeks rw ON rw.id = pd.roadmap_week_id
+        WHERE rw.roadmap_id = ?)
+  AND EXISTS (
+        SELECT 1 FROM user_problem_progress upp
+        WHERE upp.user_id = pt.user_id AND upp.problem_id = pt.item_id
+          AND upp.deleted_at IS NULL AND (upp.solved = true OR upp.status = 'completed'))`
+	if err := tx.Exec(problemSQL, userID, roadmapID).Error; err != nil {
+		return err
+	}
+	return nil
 }

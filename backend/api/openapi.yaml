@@ -1125,10 +1125,11 @@ paths:
       description: >-
         Idempotently computes and upserts the current user's digest
         notifications (today_plan, revision_due, streak_reminder, missed_goal,
-        readiness_milestone) from their plan, revision, streak, and readiness
-        data. Safe to call repeatedly (e.g. on app open or from a cron): rows
-        are deduplicated per user/day, so re-running the same day never creates
-        duplicates. Returns the current set of generated notifications.
+        readiness_milestone, weekly_review) from their plan, revision, streak,
+        and readiness data. Safe to call repeatedly (e.g. on app open or from a
+        cron): rows are deduplicated per user/day (weekly_review is deduplicated
+        per ISO week), so re-running never creates duplicates. Returns the
+        current set of generated notifications.
       operationId: generateNotifications
       responses:
         '200':
