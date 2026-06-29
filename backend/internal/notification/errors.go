@@ -11,4 +11,7 @@ var (
 	ErrNotFound = errors.New("notification: not found")
 	// ErrValidation indicates the request failed domain validation (422).
 	ErrValidation = errors.New("notification: validation failed")
+	// ErrGeneratorUnavailable indicates the generate endpoint was called on a
+	// Service that was constructed without a Generator (503).
+	ErrGeneratorUnavailable = errors.New("notification: generator unavailable")
 )

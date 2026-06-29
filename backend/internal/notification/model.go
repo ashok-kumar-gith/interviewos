@@ -138,6 +138,10 @@ type Notification struct {
 	Title     string         `gorm:"column:title;not null"`
 	Body      *string        `gorm:"column:body"`
 	Payload   JSONMap        `gorm:"column:payload;type:jsonb;not null;default:'{}'"`
+	// DedupKey, when set, makes the row idempotent under the partial unique index
+	// uq_notif_user_dedup (user_id, dedup_key). The generator sets it to a stable
+	// per-day key (e.g. "today_plan:2026-06-29"); ad-hoc notifications leave it nil.
+	DedupKey  *string        `gorm:"column:dedup_key"`
 	ReadAt    *time.Time     `gorm:"column:read_at"`
 	CreatedAt time.Time      `gorm:"column:created_at;not null;default:now()"`
 	UpdatedAt time.Time      `gorm:"column:updated_at;not null;default:now()"`

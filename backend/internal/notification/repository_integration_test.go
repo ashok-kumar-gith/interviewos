@@ -133,6 +133,70 @@ func TestRepository_Integration(t *testing.T) {
 	require.Equal(t, int64(0), count)
 }
 
+// TestUpsertByDedupKey_Integration verifies the partial unique index makes
+// dedup-keyed inserts idempotent (the generator relies on this). Requires
+// migration 000015_notification_dedup.
+func TestUpsertByDedupKey_Integration(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("DATABASE_URL not set; skipping repository integration test")
+	}
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+
+	tx := db.Begin()
+	require.NoError(t, tx.Error)
+	t.Cleanup(func() { tx.Rollback() })
+
+	repo := NewRepository(tx)
+	ctx := context.Background()
+	owner := seedUser(t, tx)
+
+	key := "today_plan:2026-06-29"
+	n := &Notification{
+		UserID:   owner,
+		Type:     TypeTodayPlan,
+		Title:    "You have 3 tasks today (~2.5h)",
+		Payload:  JSONMap{"total_tasks": float64(3)},
+		DedupKey: &key,
+	}
+
+	created, out, err := repo.UpsertByDedupKey(ctx, n)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NotEqual(t, uuid.Nil, out.ID)
+	firstID := out.ID
+
+	// Second upsert with the SAME key: no new row, returns the existing one.
+	dup := &Notification{
+		UserID:   owner,
+		Type:     TypeTodayPlan,
+		Title:    "duplicate title should be ignored",
+		DedupKey: &key,
+	}
+	created2, out2, err := repo.UpsertByDedupKey(ctx, dup)
+	require.NoError(t, err)
+	require.False(t, created2, "second upsert must not create a row")
+	require.Equal(t, firstID, out2.ID)
+
+	// Only one row exists for the owner.
+	_, total, err := repo.List(ctx, owner, ListFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+
+	// A different key creates a distinct row.
+	key2 := "revision_due:2026-06-29"
+	n3 := &Notification{UserID: owner, Type: TypeRevisionDue, Title: "2 items due for revision", DedupKey: &key2}
+	created3, _, err := repo.UpsertByDedupKey(ctx, n3)
+	require.NoError(t, err)
+	require.True(t, created3)
+
+	_, total, err = repo.List(ctx, owner, ListFilter{Limit: 10})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+}
+
 // seedUser inserts a bare user row and returns its id.
 func seedUser(t *testing.T, tx *gorm.DB) uuid.UUID {
 	t.Helper()

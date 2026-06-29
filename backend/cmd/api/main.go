@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -152,14 +153,39 @@ func run() error {
 			Tokens:  tokens,
 		}))
 
+		// Notifications module (user-scoped, in-app channel). Built before progress
+		// so the generator can be injected as the optional post-completion digest
+		// trigger. The generator (POST /notifications/generate) reads plan/revision/
+		// streak/readiness facts via narrow read ports over the migration-owned
+		// tables and upserts digest notifications idempotently (deduped per
+		// user/day), so completing tasks never spams duplicates.
+		notifRepo := notification.NewRepository(db)
+		notifReaders := notification.NewReaders(db)
+		notifGen := notification.NewGenerator(notification.GeneratorConfig{
+			Repo:      notifRepo,
+			Plans:     notifReaders,
+			Revisions: notifReaders,
+			Streaks:   notifReaders,
+			Readiness: notifReaders,
+		})
+		registrars = append(registrars, notification.NewHandler(notification.HandlerConfig{
+			Service: notification.NewService(notification.ServiceConfig{
+				Repo:      notifRepo,
+				Generator: notifGen,
+			}),
+			Tokens: tokens,
+		}))
+
 		// Progress / Today / Dashboard module. Owns task completion (transactional
 		// progress + session + streak upserts), the Today view, and the dashboard
 		// aggregate (readiness via the SRS multiplicative form, ADR D15). On
-		// learning-task completion it schedules a revision via revisionSvc.
+		// learning-task completion it schedules a revision via revisionSvc and
+		// (best-effort) refreshes the user's digest notifications via notifGen.
 		registrars = append(registrars, progress.NewHandler(progress.HandlerConfig{
 			Service: progress.NewService(progress.ServiceConfig{
 				Repo:     progress.NewRepository(db),
 				Revision: revisionSvc,
+				Notify:   notificationTrigger{gen: notifGen},
 			}),
 			Tokens: tokens,
 		}))
@@ -175,12 +201,6 @@ func run() error {
 		// Mock Interview module (user-scoped).
 		registrars = append(registrars, mock.NewHandler(mock.HandlerConfig{
 			Service: mock.NewService(mock.ServiceConfig{Repo: mock.NewRepository(db)}),
-			Tokens:  tokens,
-		}))
-
-		// Notifications module (user-scoped, in-app channel).
-		registrars = append(registrars, notification.NewHandler(notification.HandlerConfig{
-			Service: notification.NewService(notification.ServiceConfig{Repo: notification.NewRepository(db)}),
 			Tokens:  tokens,
 		}))
 
@@ -290,6 +310,21 @@ func run() error {
 
 	log.Info("shutdown complete")
 	return nil
+}
+
+// notificationTrigger adapts *notification.Generator to progress's
+// NotificationTrigger port: progress only needs to know generation ran, so the
+// returned notifications are discarded and reported as empty stubs.
+type notificationTrigger struct{ gen *notification.Generator }
+
+func (t notificationTrigger) Generate(ctx context.Context, userID uuid.UUID) ([]progress.NotificationStub, error) {
+	if t.gen == nil {
+		return nil, nil
+	}
+	if _, err := t.gen.Generate(ctx, userID); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 // buildTokenManager constructs the shared JWT token manager from configuration.

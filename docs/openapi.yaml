@@ -1118,6 +1118,30 @@ paths:
       responses:
         '204': { description: No Content }
 
+  /notifications/generate:
+    post:
+      tags: [Notifications]
+      summary: Generate the caller's digest notifications for today
+      description: >-
+        Idempotently computes and upserts the current user's digest
+        notifications (today_plan, revision_due, streak_reminder, missed_goal,
+        readiness_milestone) from their plan, revision, streak, and readiness
+        data. Safe to call repeatedly (e.g. on app open or from a cron): rows
+        are deduplicated per user/day, so re-running the same day never creates
+        duplicates. Returns the current set of generated notifications.
+      operationId: generateNotifications
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+                  count: { type: integer, description: Number of notifications returned }
+        '503': { description: Notification generation unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
+
   # ---------------- AI ----------------
   /ai/planner:
     post:

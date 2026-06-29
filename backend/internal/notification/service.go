@@ -51,18 +51,26 @@ type Notifier interface {
 // Service implements the notification use-cases. It depends only on the
 // Repository interface so it is unit-testable with a fake. It satisfies
 // Notifier (Create) for other modules.
+//
+// The optional generator powers POST /notifications/generate (digest-style
+// notifications). It is nil-safe: a Service built without one rejects Generate
+// with ErrGeneratorUnavailable rather than panicking.
 type Service struct {
 	repo Repository
+	gen  *Generator
 }
 
 // ServiceConfig configures a Service.
 type ServiceConfig struct {
 	Repo Repository
+	// Generator powers POST /notifications/generate. Optional; when nil the
+	// generate endpoint returns a 503-style ErrGeneratorUnavailable.
+	Generator *Generator
 }
 
 // NewService constructs a Service.
 func NewService(cfg ServiceConfig) *Service {
-	return &Service{repo: cfg.Repo}
+	return &Service{repo: cfg.Repo, gen: cfg.Generator}
 }
 
 // compile-time assertion that Service implements Notifier.
@@ -126,6 +134,16 @@ func (s *Service) MarkRead(ctx context.Context, userID, id uuid.UUID) (*Notifica
 // number updated.
 func (s *Service) MarkAllRead(ctx context.Context, userID uuid.UUID) (int64, error) {
 	return s.repo.MarkAllRead(ctx, userID)
+}
+
+// Generate runs the notification generator for userID (idempotent per day) and
+// returns the current set of generated notifications. Returns
+// ErrGeneratorUnavailable when no generator was wired.
+func (s *Service) Generate(ctx context.Context, userID uuid.UUID) ([]Notification, error) {
+	if s.gen == nil {
+		return nil, ErrGeneratorUnavailable
+	}
+	return s.gen.Generate(ctx, userID)
 }
 
 // --- helpers ---

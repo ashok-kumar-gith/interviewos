@@ -15,11 +15,27 @@ type RevisionScheduler interface {
 	ScheduleForCompletion(ctx context.Context, userID uuid.UUID, itemType, itemID, pillarType string) error
 }
 
+// NotificationTrigger is the optional port the progress service uses to refresh
+// a user's digest notifications after a task completion (e.g. streak_reminder /
+// readiness_milestone). It is satisfied by *notification.Generator. The
+// dependency is nil-safe and idempotent: the underlying generator dedupes per
+// user/day, so completing many tasks never spams duplicate notifications, and a
+// failure here must never fail the completion that already committed.
+type NotificationTrigger interface {
+	Generate(ctx context.Context, userID uuid.UUID) ([]NotificationStub, error)
+}
+
+// NotificationStub is the minimal shape the trigger returns; progress ignores
+// the contents and only cares that generation ran. Defined here so progress
+// stays decoupled from the notification module's concrete types.
+type NotificationStub struct{}
+
 // Service implements the progress/Today/dashboard use-cases. It orchestrates the
 // Repository and applies the readiness model (03-ARCHITECTURE.md §8.1, ADR D15).
 type Service struct {
 	repo     Repository
 	revision RevisionScheduler
+	notify   NotificationTrigger
 	now      func() time.Time
 }
 
@@ -29,7 +45,10 @@ type ServiceConfig struct {
 	// Revision is the optional spaced-repetition scheduler invoked on learning-
 	// task completion. nil disables scheduling (progress stays fully functional).
 	Revision RevisionScheduler
-	Now      func() time.Time
+	// Notify is the optional notification trigger invoked (best-effort) after a
+	// task completion to refresh the user's digest notifications. nil disables it.
+	Notify NotificationTrigger
+	Now    func() time.Time
 }
 
 // NewService constructs a Service.
@@ -38,7 +57,7 @@ func NewService(cfg ServiceConfig) *Service {
 	if nowFn == nil {
 		nowFn = time.Now
 	}
-	return &Service{repo: cfg.Repo, revision: cfg.Revision, now: nowFn}
+	return &Service{repo: cfg.Repo, revision: cfg.Revision, notify: cfg.Notify, now: nowFn}
 }
 
 // learningKinds are the task kinds that represent learning a content item and
@@ -115,6 +134,14 @@ func (s *Service) CompleteTask(ctx context.Context, userID, taskID uuid.UUID, p 
 	if err != nil {
 		return nil, Streak{}, err
 	}
+
+	// Best-effort: refresh the user's digest notifications (streak_reminder /
+	// readiness_milestone, etc.). Idempotent + deduped in the generator, so this
+	// never spams; a failure must not fail the completion that already committed.
+	if s.notify != nil {
+		_, _ = s.notify.Generate(ctx, userID)
+	}
+
 	return task, streak, nil
 }
 

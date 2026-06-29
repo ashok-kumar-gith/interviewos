@@ -37,6 +37,30 @@ func (f *fakeRepository) Create(_ context.Context, n *Notification) error {
 	return nil
 }
 
+func (f *fakeRepository) UpsertByDedupKey(_ context.Context, n *Notification) (bool, *Notification, error) {
+	if f.createErr != nil {
+		return false, nil, f.createErr
+	}
+	if n.DedupKey != nil {
+		for _, existing := range f.items {
+			if existing.UserID == n.UserID && existing.DedupKey != nil && *existing.DedupKey == *n.DedupKey {
+				cp := *existing
+				return false, &cp, nil
+			}
+		}
+	}
+	if n.ID == uuid.Nil {
+		n.ID = uuid.New()
+	}
+	if n.CreatedAt.IsZero() {
+		n.CreatedAt = time.Now()
+	}
+	cp := *n
+	f.items[n.ID] = &cp
+	out := cp
+	return true, &out, nil
+}
+
 func (f *fakeRepository) GetByID(_ context.Context, userID, id uuid.UUID) (*Notification, error) {
 	n, ok := f.items[id]
 	if !ok || n.UserID != userID {

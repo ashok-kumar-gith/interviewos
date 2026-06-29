@@ -41,6 +41,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	g := v1.Group("/notifications", auth.RequireAuth(h.tokens))
 	{
 		g.GET("", h.List)
+		g.POST("/generate", h.Generate)
 		g.POST("/read-all", h.MarkAllRead)
 		g.POST("/:notificationId/read", h.MarkRead)
 	}
@@ -123,6 +124,32 @@ func (h *Handler) List(c *gin.Context) {
 	})
 }
 
+type generateResponse struct {
+	Data  []notificationResponse `json:"data"`
+	Count int                    `json:"count"`
+}
+
+// Generate handles POST /notifications/generate. It (idempotently) computes the
+// caller's digest notifications for today and returns the current set. Safe to
+// call repeatedly (e.g. on app open or from a cron) without creating duplicates.
+func (h *Handler) Generate(c *gin.Context) {
+	uid, ok := auth.UserIDFromContext(c)
+	if !ok {
+		h.unauth(c)
+		return
+	}
+	items, err := h.svc.Generate(c.Request.Context(), uid)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	data := make([]notificationResponse, len(items))
+	for i := range items {
+		data[i] = toResponse(&items[i])
+	}
+	c.JSON(http.StatusOK, generateResponse{Data: data, Count: len(data)})
+}
+
 // MarkRead handles POST /notifications/:notificationId/read.
 func (h *Handler) MarkRead(c *gin.Context) {
 	uid, ok := auth.UserIDFromContext(c)
@@ -183,6 +210,8 @@ func (h *Handler) writeServiceError(c *gin.Context, err error) {
 		server.AbortError(c, http.StatusUnprocessableEntity, server.CodeValidationError, "validation failed", details)
 	case errors.Is(err, ErrNotFound):
 		server.AbortError(c, http.StatusNotFound, server.CodeNotFound, "notification not found", nil)
+	case errors.Is(err, ErrGeneratorUnavailable):
+		server.AbortError(c, http.StatusServiceUnavailable, server.CodeInternal, "notification generation is unavailable", nil)
 	default:
 		server.AbortError(c, http.StatusInternalServerError, server.CodeInternal, "internal server error", nil)
 	}

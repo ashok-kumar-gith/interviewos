@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // ListFilter narrows and paginates a user's notifications.
@@ -21,6 +22,12 @@ type ListFilter struct {
 // filters deleted_at IS NULL via gorm.DeletedAt on the model).
 type Repository interface {
 	Create(ctx context.Context, n *Notification) error
+	// UpsertByDedupKey inserts n if no live notification with the same
+	// (user_id, dedup_key) exists, otherwise it returns the existing row WITHOUT
+	// creating a duplicate. n.DedupKey must be non-nil. The returned bool reports
+	// whether a new row was created. This is the idempotent path the generator
+	// uses so re-running daily generation never spams duplicates.
+	UpsertByDedupKey(ctx context.Context, n *Notification) (created bool, out *Notification, err error)
 	GetByID(ctx context.Context, userID, id uuid.UUID) (*Notification, error)
 	List(ctx context.Context, userID uuid.UUID, f ListFilter) ([]Notification, int64, error)
 	// MarkRead transitions a single owned, unread notification to read and stamps
@@ -44,6 +51,32 @@ func NewRepository(db *gorm.DB) Repository {
 
 func (r *gormRepository) Create(ctx context.Context, n *Notification) error {
 	return r.db.WithContext(ctx).Create(n).Error
+}
+
+func (r *gormRepository) UpsertByDedupKey(ctx context.Context, n *Notification) (bool, *Notification, error) {
+	if n.DedupKey == nil {
+		return false, nil, errors.New("notification: UpsertByDedupKey requires a dedup_key")
+	}
+	// Insert-if-absent guarded by the partial unique index uq_notif_user_dedup.
+	// ON CONFLICT DO NOTHING avoids a duplicate without erroring on the race; we
+	// then read back the live row (either the one we inserted or the pre-existing
+	// one) so the caller always gets the authoritative persisted notification.
+	res := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{DoNothing: true}).
+		Create(n)
+	if res.Error != nil {
+		return false, nil, res.Error
+	}
+	created := res.RowsAffected > 0
+
+	var existing Notification
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND dedup_key = ?", n.UserID, *n.DedupKey).
+		First(&existing).Error
+	if err != nil {
+		return false, nil, err
+	}
+	return created, &existing, nil
 }
 
 func (r *gormRepository) GetByID(ctx context.Context, userID, id uuid.UUID) (*Notification, error) {
