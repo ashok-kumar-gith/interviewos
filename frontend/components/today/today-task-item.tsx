@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Check, Loader2, SkipForward, X } from "lucide-react";
+import { Check, Loader2, X } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { SegmentedRating } from "@/components/ui/segmented-rating";
 import { DifficultyPill } from "@/components/ui/difficulty-pill";
 import { KindIcon, kindLabel } from "@/components/today/kind-icon";
+import { TaskActionsMenu } from "@/components/today/task-actions-menu";
 import type { PlanTask } from "@/lib/api/curriculum";
 import type { ConfidenceLevel } from "@/lib/api/types";
 import { pillarKey, pillarLabel } from "@/lib/pillar-meta";
@@ -20,16 +21,22 @@ export interface TodayTaskItemProps {
   task: PlanTask;
   onComplete: (input: { confidence: ConfidenceLevel; timeSpentMinutes: number }) => void;
   onSkip: () => void;
+  onReschedule: (toDate: string) => void;
+  onViewDetail: () => void;
   completing?: boolean;
   skipping?: boolean;
+  rescheduling?: boolean;
 }
 
 export function TodayTaskItem({
   task,
   onComplete,
   onSkip,
+  onReschedule,
+  onViewDetail,
   completing = false,
   skipping = false,
+  rescheduling = false,
 }: TodayTaskItemProps) {
   const [expanded, setExpanded] = React.useState(false);
   const [confidence, setConfidence] = React.useState<number | undefined>(
@@ -92,14 +99,16 @@ export function TodayTaskItem({
         </span>
 
         <div className="min-w-0 flex-1">
-          <p
+          <button
+            type="button"
+            onClick={onViewDetail}
             className={cn(
-              "text-sm font-medium leading-tight",
+              "block text-left text-sm font-medium leading-tight hover:underline",
               (done || skipped) && "line-through",
             )}
           >
             {task.title}
-          </p>
+          </button>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <Badge variant="outline" size="sm" style={{ borderColor: accent, color: accent }}>
               {pillarLabel(task.pillar_type)}
@@ -125,19 +134,17 @@ export function TodayTaskItem({
           </div>
         </div>
 
-        {!done && !skipped && (
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="Skip task"
-              onClick={onSkip}
-              loading={skipping}
-            >
-              {!skipping && <SkipForward aria-hidden />}
-            </Button>
-          </div>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          <TaskActionsMenu
+            triggerLabel={`Actions for ${task.title}`}
+            onViewDetail={onViewDetail}
+            onReschedule={onReschedule}
+            onSkip={onSkip}
+            rescheduling={rescheduling}
+            skipping={skipping}
+            showSkip={!done && !skipped}
+          />
+        </div>
       </div>
 
       {expanded && !done && !skipped && (

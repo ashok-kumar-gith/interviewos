@@ -87,12 +87,41 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-h1">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          You&apos;re {overall}% ready
-          {readyDate ? ` · Est. interview-ready ${readyDate}` : ""}
-        </p>
+      <header className="space-y-4">
+        <div>
+          <h1 className="text-h1">Dashboard</h1>
+          <p className="mt-1 text-sm text-muted-foreground">You&apos;re {overall}% ready</p>
+        </div>
+        <Card
+          className={cn(
+            "flex items-center gap-3 p-4",
+            readyDate ? "border-primary/40 bg-primary/5" : "border-border",
+          )}
+        >
+          <span
+            className={cn(
+              "grid size-10 shrink-0 place-items-center rounded-full",
+              readyDate ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
+            )}
+          >
+            <CalendarCheck className="size-5" aria-hidden />
+          </span>
+          {readyDate ? (
+            <div>
+              <p className="text-2xs uppercase tracking-wide text-muted-foreground">
+                Est. interview-ready
+              </p>
+              <p className="text-h3 font-bold tabular-nums">{readyDate}</p>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm font-medium">Est. interview-ready: not projected yet</p>
+              <p className="text-sm text-muted-foreground">
+                Keep completing tasks — we&apos;ll project a date as your progress accrues.
+              </p>
+            </div>
+          )}
+        </Card>
       </header>
 
       <section aria-labelledby="overall-readiness" className="grid gap-4 lg:grid-cols-3">

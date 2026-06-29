@@ -1,7 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { CircleDot, RefreshCw, Rocket } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -12,9 +17,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DifficultyPill } from "@/components/ui/difficulty-pill";
 import { KindIcon } from "@/components/today/kind-icon";
+import { TaskActionsMenu } from "@/components/today/task-actions-menu";
+import { TaskDetailDialog } from "@/components/today/task-detail-dialog";
 import {
   getActiveRoadmap,
   getRoadmapWeek,
+  rescheduleTask,
+  skipTask,
+  type PlanTask,
   type Roadmap,
   type RoadmapWeek,
 } from "@/lib/api/curriculum";
@@ -37,7 +47,10 @@ function formatRange(start: string, end: string): string {
 }
 
 export default function RoadmapPage() {
+  const queryClient = useQueryClient();
   const [selectedWeek, setSelectedWeek] = React.useState<number | null>(null);
+  const [detailTask, setDetailTask] = React.useState<PlanTask | null>(null);
+  const [actionError, setActionError] = React.useState<string | null>(null);
 
   const roadmapQuery = useQuery<Roadmap, unknown>({
     queryKey: ["roadmap", "active"],
@@ -60,6 +73,28 @@ export default function RoadmapPage() {
     queryKey: ["roadmap", roadmap?.id, "week", weekNumber],
     queryFn: () => getRoadmapWeek(roadmap!.id, weekNumber),
     enabled: !!roadmap?.id,
+  });
+
+  function invalidateTaskQueries() {
+    void queryClient.invalidateQueries({ queryKey: ["roadmap"] });
+    void queryClient.invalidateQueries({ queryKey: ["today"] });
+    void queryClient.invalidateQueries({ queryKey: ["overdue"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  }
+
+  const rescheduleMutation = useMutation({
+    mutationFn: ({ taskId, toDate }: { taskId: string; toDate: string }) =>
+      rescheduleTask(taskId, { to_date: toDate }),
+    onMutate: () => setActionError(null),
+    onError: () => setActionError("Couldn't reschedule that task. Try again."),
+    onSettled: invalidateTaskQueries,
+  });
+
+  const skipMutation = useMutation({
+    mutationFn: ({ taskId }: { taskId: string }) => skipTask(taskId),
+    onMutate: () => setActionError(null),
+    onError: () => setActionError("Couldn't skip that task. Try again."),
+    onSettled: invalidateTaskQueries,
   });
 
   if (roadmapQuery.isLoading) return <RoadmapSkeleton />;
@@ -122,7 +157,26 @@ export default function RoadmapPage() {
         ))}
       </div>
 
-      <WeekPanel query={weekQuery} weekNumber={weekNumber} />
+      {actionError && <Alert variant="danger">{actionError}</Alert>}
+
+      <WeekPanel
+        query={weekQuery}
+        weekNumber={weekNumber}
+        today={todayISO()}
+        onViewDetail={setDetailTask}
+        onReschedule={(taskId, toDate) => rescheduleMutation.mutate({ taskId, toDate })}
+        onSkip={(taskId) => skipMutation.mutate({ taskId })}
+        reschedulingId={
+          rescheduleMutation.isPending ? rescheduleMutation.variables?.taskId ?? null : null
+        }
+        skippingId={skipMutation.isPending ? skipMutation.variables?.taskId ?? null : null}
+      />
+
+      <TaskDetailDialog
+        task={detailTask}
+        open={detailTask !== null}
+        onClose={() => setDetailTask(null)}
+      />
     </Page>
   );
 }
@@ -130,9 +184,21 @@ export default function RoadmapPage() {
 function WeekPanel({
   query,
   weekNumber,
+  today,
+  onViewDetail,
+  onReschedule,
+  onSkip,
+  reschedulingId,
+  skippingId,
 }: {
   query: UseQueryResult<RoadmapWeek, unknown>;
   weekNumber: number;
+  today: string;
+  onViewDetail: (task: PlanTask) => void;
+  onReschedule: (taskId: string, toDate: string) => void;
+  onSkip: (taskId: string) => void;
+  reschedulingId: string | null;
+  skippingId: string | null;
 }) {
   if (query.isLoading || query.isFetching) {
     return (
@@ -186,7 +252,8 @@ function WeekPanel({
       ) : (
         <ol className="space-y-3 border-l border-border pl-5">
           {days.map((day) => {
-            const isToday = day.date === todayISO();
+            const isToday = day.date === today;
+            const isPast = day.date < today;
             const tasks = day.tasks ?? [];
             const done = tasks.filter((t) => t.status === "completed").length;
             return (
@@ -223,27 +290,55 @@ function WeekPanel({
                     </span>
                   </div>
                   {tasks.length > 0 && (
-                    <ul className="mt-3 space-y-2">
+                    <ul className="mt-3 space-y-1">
                       {tasks.map((t) => {
                         const accent = `hsl(var(--pillar-${pillarKey(t.pillar_type)}))`;
+                        const done = t.status === "completed";
+                        const incomplete = t.status === "pending" || t.status === "in_progress";
+                        const isOverdue = isPast && incomplete;
                         return (
-                          <li
-                            key={t.id}
-                            className={cn(
-                              "flex items-center gap-2.5 text-sm",
-                              t.status === "completed" && "text-muted-foreground line-through",
-                            )}
-                          >
+                          <li key={t.id} className="flex items-center gap-2.5 text-sm">
                             <span className="shrink-0 [&_svg]:size-4" style={{ color: accent }}>
                               <KindIcon kind={t.kind} />
                             </span>
-                            <span className="min-w-0 flex-1 truncate">{t.title}</span>
+                            <button
+                              type="button"
+                              onClick={() => onViewDetail(t)}
+                              className={cn(
+                                "min-w-0 flex-1 truncate text-left hover:underline",
+                                done && "text-muted-foreground line-through",
+                              )}
+                            >
+                              {t.title}
+                            </button>
+                            {isOverdue && (
+                              <Badge variant="warning" size="sm" className="shrink-0">
+                                Overdue
+                              </Badge>
+                            )}
+                            {t.status === "rescheduled" && (
+                              <Badge variant="warning" size="sm" className="shrink-0">
+                                Moved
+                              </Badge>
+                            )}
                             {t.difficulty ? <DifficultyPill difficulty={t.difficulty} /> : null}
                             {t.estimated_minutes ? (
                               <span className="shrink-0 text-xs text-muted-foreground">
                                 {t.estimated_minutes}m
                               </span>
                             ) : null}
+                            {incomplete && (
+                              <span className="shrink-0">
+                                <TaskActionsMenu
+                                  triggerLabel={`Actions for ${t.title}`}
+                                  onViewDetail={() => onViewDetail(t)}
+                                  onReschedule={(toDate) => onReschedule(t.id, toDate)}
+                                  onSkip={() => onSkip(t.id)}
+                                  rescheduling={reschedulingId === t.id}
+                                  skipping={skippingId === t.id}
+                                />
+                              </span>
+                            )}
                           </li>
                         );
                       })}

@@ -10,9 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TodayTaskItem } from "@/components/today/today-task-item";
+import { OverdueSection } from "@/components/today/overdue-section";
+import { TaskDetailDialog } from "@/components/today/task-detail-dialog";
 import {
   completeTask,
   getToday,
+  rescheduleTask,
   skipTask,
   type PlanDay,
   type PlanTask,
@@ -35,6 +38,7 @@ function formatDate(iso: string): string {
 export default function TodayPage() {
   const queryClient = useQueryClient();
   const [actionError, setActionError] = React.useState<string | null>(null);
+  const [detailTask, setDetailTask] = React.useState<PlanTask | null>(null);
 
   const query = useQuery<PlanDay, unknown>({
     queryKey: TODAY_KEY,
@@ -88,6 +92,31 @@ export default function TodayPage() {
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: TODAY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["overdue"] });
+    },
+  });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: ({ taskId, toDate }: { taskId: string; toDate: string }) =>
+      rescheduleTask(taskId, { to_date: toDate }),
+    onMutate: async ({ taskId }) => {
+      setActionError(null);
+      await queryClient.cancelQueries({ queryKey: TODAY_KEY });
+      const previous = queryClient.getQueryData<PlanDay>(TODAY_KEY);
+      queryClient.setQueryData<PlanDay>(TODAY_KEY, (old) =>
+        old ? patchTask(old, taskId, { status: "rescheduled" }) : old,
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(TODAY_KEY, ctx.previous);
+      setActionError("Couldn't reschedule that task. Try again.");
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: TODAY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["roadmap"] });
+      void queryClient.invalidateQueries({ queryKey: ["overdue"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
   });
 
@@ -138,10 +167,15 @@ export default function TodayPage() {
               completeMutation.isPending && completeMutation.variables?.taskId === task.id
             }
             skipping={skipMutation.isPending && skipMutation.variables?.taskId === task.id}
+            rescheduling={
+              rescheduleMutation.isPending && rescheduleMutation.variables?.taskId === task.id
+            }
             onComplete={({ confidence, timeSpentMinutes }) =>
               completeMutation.mutate({ taskId: task.id, confidence, timeSpentMinutes })
             }
             onSkip={() => skipMutation.mutate({ taskId: task.id })}
+            onReschedule={(toDate) => rescheduleMutation.mutate({ taskId: task.id, toDate })}
+            onViewDetail={() => setDetailTask(task)}
           />
         </li>
       ))}
@@ -160,6 +194,8 @@ export default function TodayPage() {
       )}
 
       {actionError && <Alert variant="danger">{actionError}</Alert>}
+
+      <OverdueSection />
 
       {day.is_rest_day ? (
         <EmptyState
@@ -185,6 +221,12 @@ export default function TodayPage() {
       ) : (
         taskList
       )}
+
+      <TaskDetailDialog
+        task={detailTask}
+        open={detailTask !== null}
+        onClose={() => setDetailTask(null)}
+      />
     </Page>
   );
 }

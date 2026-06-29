@@ -91,6 +91,43 @@ export function setAccessTokenProvider(provider: TokenProvider): void {
   accessTokenProvider = provider;
 }
 
+/* --------------------------------------------------------------------------
+ * Transparent access-token refresh on 401.
+ *
+ * The access token lives in memory only (ADR §5.3) and is short-lived, so it is
+ * absent after a reload and expires mid-session. When a request comes back 401
+ * we call a registered refresh handler (which mints a fresh access token from
+ * the HttpOnly refresh cookie) exactly once, then retry the original request.
+ * Concurrent 401s share a single in-flight refresh so we never stampede.
+ * ------------------------------------------------------------------------ */
+
+type RefreshHandler = () => Promise<boolean>;
+
+let refreshHandler: RefreshHandler | null = null;
+let inflightRefresh: Promise<boolean> | null = null;
+
+/**
+ * Register how the client refreshes the access token. The handler should mint a
+ * new access token (via POST /auth/refresh, which sends the HttpOnly cookie),
+ * store it, and resolve true on success or false when the session is truly gone.
+ */
+export function setRefreshHandler(handler: RefreshHandler): void {
+  refreshHandler = handler;
+}
+
+/** Run the refresh handler, coalescing concurrent callers onto one attempt. */
+function refreshAccessToken(): Promise<boolean> {
+  if (!refreshHandler) return Promise.resolve(false);
+  if (!inflightRefresh) {
+    inflightRefresh = refreshHandler()
+      .catch(() => false)
+      .finally(() => {
+        inflightRefresh = null;
+      });
+  }
+  return inflightRefresh;
+}
+
 export interface RequestOptions extends Omit<RequestInit, "body"> {
   /** JSON-serializable body; set automatically with the correct content-type. */
   body?: unknown;
@@ -109,32 +146,43 @@ function buildUrl(path: string, query?: RequestOptions["query"]): string {
 }
 
 /**
- * Core request method. Returns the unwrapped `data` from the success envelope.
- * Throws `ApiError` on any non-2xx response.
+ * Performs the raw fetch with the Accept/Authorization/Content-Type headers and
+ * the refresh cookie. On a 401 it transparently refreshes the access token once
+ * and replays the request, so callers never see spurious auth failures from an
+ * expired/absent in-memory token. `path` requests skip the retry only when
+ * `allowRetry` is false (used internally to avoid recursing on /auth/refresh).
  */
-export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+async function performRequest(
+  path: string,
+  options: RequestOptions,
+  allowRetry: boolean,
+): Promise<Response> {
   const { body, query, headers, ...rest } = options;
 
-  const finalHeaders = new Headers(headers);
-  finalHeaders.set("Accept", "application/json");
+  const send = (): Promise<Response> => {
+    const finalHeaders = new Headers(headers);
+    finalHeaders.set("Accept", "application/json");
 
-  const token = accessTokenProvider();
-  if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
+    const token = accessTokenProvider();
+    if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
 
-  let serializedBody: BodyInit | undefined;
-  if (body !== undefined) {
-    finalHeaders.set("Content-Type", "application/json");
-    serializedBody = JSON.stringify(body);
-  }
+    let serializedBody: BodyInit | undefined;
+    if (body !== undefined) {
+      finalHeaders.set("Content-Type", "application/json");
+      serializedBody = JSON.stringify(body);
+    }
 
-  let res: Response;
-  try {
-    res = await fetch(buildUrl(path, query), {
+    return fetch(buildUrl(path, query), {
       ...rest,
       headers: finalHeaders,
       body: serializedBody,
       credentials: "include", // send the HttpOnly refresh cookie when present
     });
+  };
+
+  let res: Response;
+  try {
+    res = await send();
   } catch {
     throw new ApiError(
       0,
@@ -142,6 +190,37 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       "Network request failed. Check your connection and retry.",
     );
   }
+
+  // Transparent re-auth: on 401, refresh the access token once and replay.
+  if (res.status === 401 && allowRetry && !isAuthPath(path)) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      try {
+        res = await send();
+      } catch {
+        throw new ApiError(
+          0,
+          "INTERNAL",
+          "Network request failed. Check your connection and retry.",
+        );
+      }
+    }
+  }
+
+  return res;
+}
+
+/** Auth endpoints must not trigger the 401→refresh→retry loop. */
+function isAuthPath(path: string): boolean {
+  return path.startsWith("/auth/");
+}
+
+/**
+ * Core request method. Returns the unwrapped `data` from the success envelope.
+ * Throws `ApiError` on any non-2xx response.
+ */
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const res = await performRequest(path, options, true);
 
   if (res.status === 204) {
     return undefined as T;
@@ -182,35 +261,7 @@ export async function apiFetchList<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<{ data: T[]; meta: ApiMeta }> {
-  const { body, query, headers, ...rest } = options;
-
-  const finalHeaders = new Headers(headers);
-  finalHeaders.set("Accept", "application/json");
-
-  const token = accessTokenProvider();
-  if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
-
-  let serializedBody: BodyInit | undefined;
-  if (body !== undefined) {
-    finalHeaders.set("Content-Type", "application/json");
-    serializedBody = JSON.stringify(body);
-  }
-
-  let res: Response;
-  try {
-    res = await fetch(buildUrl(path, query), {
-      ...rest,
-      headers: finalHeaders,
-      body: serializedBody,
-      credentials: "include",
-    });
-  } catch {
-    throw new ApiError(
-      0,
-      "INTERNAL",
-      "Network request failed. Check your connection and retry.",
-    );
-  }
+  const res = await performRequest(path, options, true);
 
   const text = await res.text();
   const payload: unknown = text ? safeJsonParse(text) : undefined;
