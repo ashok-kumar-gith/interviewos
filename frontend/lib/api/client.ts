@@ -241,7 +241,27 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     );
   }
 
-  return (payload as ApiSuccessEnvelope<T> | undefined)?.data as T;
+  // The backend wraps LIST responses in a { data, meta } envelope but returns
+  // single-object responses (auth tokens, dashboard, today, profile, …) flat at
+  // the top level. Unwrap `.data` only when the payload is actually an envelope;
+  // otherwise return it as-is. (Unwrapping unconditionally returned undefined for
+  // every flat response, which broke login + every single-object page.)
+  return unwrap<T>(payload);
+}
+
+/**
+ * Returns the `data` field when `payload` is a success envelope ({ data, meta }),
+ * otherwise returns the payload itself. An envelope is recognized as an object
+ * whose only keys are `data` and (optionally) `meta`, so domain objects that
+ * happen to contain a `data` field are not misread.
+ */
+function unwrap<T>(payload: unknown): T {
+  if (payload && typeof payload === "object" && "data" in payload) {
+    const keys = Object.keys(payload as Record<string, unknown>);
+    const isEnvelope = keys.every((k) => k === "data" || k === "meta");
+    if (isEnvelope) return (payload as ApiSuccessEnvelope<T>).data;
+  }
+  return payload as T;
 }
 
 function safeJsonParse(text: string): unknown {
