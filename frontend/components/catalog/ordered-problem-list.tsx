@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { RefreshCw, Search } from "lucide-react";
+import { ChevronRight, RefreshCw, Search } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
@@ -29,6 +30,8 @@ export interface OrderedProblemListProps<T extends OrderedProblem> {
   title: string;
   subtitle: string;
   queryKey: string;
+  /** Base path each row links to — `${hrefBase}/${id}` (e.g. "/system-design"). */
+  hrefBase: string;
   fetcher: (filters: {
     page?: number;
     page_size?: number;
@@ -41,6 +44,7 @@ export function OrderedProblemList<T extends OrderedProblem>({
   title,
   subtitle,
   queryKey,
+  hrefBase,
   fetcher,
 }: OrderedProblemListProps<T>) {
   const [page, setPage] = React.useState(1);
@@ -138,13 +142,19 @@ export function OrderedProblemList<T extends OrderedProblem>({
         <ol className="space-y-2">
           {items.map((item, i) => (
             <li key={item.id}>
-              <Card className="flex items-center gap-3 p-4">
-                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-xs font-medium tabular-nums text-muted-foreground">
-                  {item.order_index ?? (page - 1) * PAGE_SIZE + i + 1}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
-                <DifficultyPill difficulty={item.difficulty} />
-              </Card>
+              <Link
+                href={`${hrefBase}/${item.id}`}
+                className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <Card className="flex items-center gap-3 p-4 transition-colors hover:bg-muted/40">
+                  <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-xs font-medium tabular-nums text-muted-foreground">
+                    {item.order_index ?? (page - 1) * PAGE_SIZE + i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{item.title}</span>
+                  <DifficultyPill difficulty={item.difficulty} />
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                </Card>
+              </Link>
             </li>
           ))}
         </ol>

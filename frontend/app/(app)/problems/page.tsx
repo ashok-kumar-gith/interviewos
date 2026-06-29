@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ExternalLink, RefreshCw, Search } from "lucide-react";
 
@@ -172,7 +173,12 @@ export default function ProblemsPage() {
                 <TableRow key={p.id}>
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
-                      {p.title}
+                      <Link
+                        href={`/problems/${p.id}`}
+                        className="rounded-sm underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {p.title}
+                      </Link>
                       {p.is_premium && (
                         <span className="text-2xs uppercase text-warning">Premium</span>
                       )}

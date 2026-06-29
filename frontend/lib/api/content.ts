@@ -6,11 +6,14 @@
 
 import { api } from "@/lib/api/client";
 import type {
+  ConfidenceLevel,
   Difficulty,
   PaginationMeta,
   Priority,
   ProblemPlatform,
   ProblemSourceName,
+  ProgressStatus,
+  ResourceType,
 } from "@/lib/api/types";
 
 /* ---- DSA ---- */
@@ -85,6 +88,113 @@ export interface Company {
   is_fully_weighted?: boolean;
 }
 
+/* ---- Resources ---- */
+
+export interface Resource {
+  id: string;
+  type: ResourceType;
+  title: string;
+  author?: string | null;
+  url?: string | null;
+  provider?: string | null;
+  description?: string | null;
+  estimated_minutes?: number | null;
+  difficulty?: Difficulty | null;
+  priority?: Priority;
+  is_free?: boolean;
+}
+
+/* ---- Progress (embedded in detail responses) ---- */
+
+export interface UserTopicProgress {
+  id: string;
+  user_id: string;
+  topic_id: string;
+  status: ProgressStatus;
+  confidence?: ConfidenceLevel | null;
+}
+
+export interface UserProblemProgress {
+  id: string;
+  user_id: string;
+  problem_id: string;
+  status: ProgressStatus;
+  solved: boolean;
+  confidence?: ConfidenceLevel | null;
+}
+
+/* ---- Detail shapes (full content for the [id] pages) ---- */
+
+export interface Subtopic {
+  id: string;
+  topic_id: string;
+  slug: string;
+  name: string;
+  content_md?: string | null;
+  estimated_hours?: number;
+  sort_order?: number;
+}
+
+export interface TopicDetail extends Topic {
+  concept_md?: string | null;
+  common_mistakes?: string | null;
+  expected_questions?: string[];
+  prerequisites?: string[];
+  subtopics?: Subtopic[];
+  resources?: Resource[];
+  progress?: UserTopicProgress | null;
+}
+
+export interface ProblemSource {
+  source: ProblemSourceName;
+  source_rank?: number | null;
+  source_url?: string | null;
+}
+
+export interface ProblemCompanyFrequency {
+  company_id: string;
+  company_name: string;
+  frequency: number;
+  last_seen_period?: string | null;
+}
+
+export interface ProblemDetail extends Problem {
+  prompt_summary?: string | null;
+  approach_md?: string | null;
+  common_mistakes?: string | null;
+  patterns?: Pattern[];
+  sources?: ProblemSource[];
+  company_frequency?: ProblemCompanyFrequency[];
+  progress?: UserProblemProgress | null;
+}
+
+export interface DesignProblemDetail extends DesignProblem {
+  requirements_md?: string | null;
+  capacity_estimation_md?: string | null;
+  api_design_md?: string | null;
+  data_model_md?: string | null;
+  high_level_design_md?: string | null;
+  caching_md?: string | null;
+  queueing_md?: string | null;
+  scaling_md?: string | null;
+  tradeoffs_md?: string | null;
+  failure_handling_md?: string | null;
+  alternatives_md?: string | null;
+  interview_tips_md?: string | null;
+  follow_up_questions?: string[];
+}
+
+export interface LLDProblemDetail extends LLDProblem {
+  requirements_md?: string | null;
+  entities_md?: string | null;
+  class_diagram_md?: string | null;
+  design_patterns?: string[];
+  solid_notes_md?: string | null;
+  api_or_interface_md?: string | null;
+  tradeoffs_md?: string | null;
+  follow_up_questions?: string[];
+}
+
 export interface ListResult<T> {
   data: T[];
   meta: Partial<PaginationMeta>;
@@ -153,4 +263,41 @@ export function listCompanies(query?: string): Promise<ListResult<Company>> {
   return api.getList<Company>("/companies", {
     query: { page_size: 100, q: query || undefined },
   });
+}
+
+/* ---- Detail fetchers ---- */
+
+/** GET /problems/{id} — a problem with patterns, sources, company frequency. */
+export function getProblem(id: string): Promise<ProblemDetail> {
+  return api.get<ProblemDetail>(`/problems/${id}`);
+}
+
+/** GET /design-problems/{id} — an HLD design problem with all sections. */
+export function getDesignProblem(id: string): Promise<DesignProblemDetail> {
+  return api.get<DesignProblemDetail>(`/design-problems/${id}`);
+}
+
+/** GET /lld-problems/{id} — an LLD problem with all sections. */
+export function getLLDProblem(id: string): Promise<LLDProblemDetail> {
+  return api.get<LLDProblemDetail>(`/lld-problems/${id}`);
+}
+
+/** GET /topics/{id} — a topic with subtopics, resources, and progress. */
+export function getTopic(id: string): Promise<TopicDetail> {
+  return api.get<TopicDetail>(`/topics/${id}`);
+}
+
+export interface ResourceFilters {
+  page?: number;
+  page_size?: number;
+  type?: ResourceType;
+  topic_id?: string;
+  difficulty?: Difficulty;
+  q?: string;
+  sort?: string;
+}
+
+/** GET /resources — paginated resource library with type/difficulty filters. */
+export function listResources(filters: ResourceFilters = {}): Promise<ListResult<Resource>> {
+  return api.getList<Resource>("/resources", { query: { ...filters } });
 }

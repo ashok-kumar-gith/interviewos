@@ -9,6 +9,7 @@ export default function LLDPage() {
       title="Low-Level Design"
       subtitle="LLD problems — class modeling, design patterns, and clean OO abstractions."
       queryKey="lld-problems"
+      hrefBase="/lld"
       fetcher={listLLDProblems}
     />
   );

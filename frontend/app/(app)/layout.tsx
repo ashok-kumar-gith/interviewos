@@ -2,11 +2,15 @@ import type { ReactNode } from "react";
 import { Sidebar } from "@/components/shell/sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { ThemeSync } from "@/components/shell/theme-sync";
+import { KeyboardShortcuts } from "@/components/shell/keyboard-shortcuts";
+import { CommandPalette } from "@/components/command-palette/command-palette";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       <ThemeSync />
+      <KeyboardShortcuts />
+      <CommandPalette />
       <Topbar />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />

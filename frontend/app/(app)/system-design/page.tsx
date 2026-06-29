@@ -9,6 +9,7 @@ export default function SystemDesignPage() {
       title="System Design"
       subtitle="The HLD design-problem catalog, ordered as a study sequence."
       queryKey="design-problems"
+      hrefBase="/system-design"
       fetcher={listDesignProblems}
     />
   );

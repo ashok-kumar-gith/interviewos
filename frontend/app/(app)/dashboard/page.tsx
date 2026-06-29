@@ -12,6 +12,7 @@ import {
 
 import { ReadinessCard } from "@/components/dashboard/readiness-card";
 import { PillarRadar } from "@/components/dashboard/pillar-radar";
+import { StreakHeatmap } from "@/components/dashboard/streak-heatmap";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert } from "@/components/ui/alert";
@@ -154,6 +155,13 @@ export default function DashboardPage() {
             Go to Today
           </Link>
         </Card>
+      </section>
+
+      <section aria-labelledby="study-activity" className="space-y-4">
+        <h2 id="study-activity" className="sr-only">
+          Study activity
+        </h2>
+        <StreakHeatmap />
       </section>
 
       <section aria-labelledby="pillar-readiness" className="space-y-4">

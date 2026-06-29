@@ -2,16 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Clock, Mic, Settings } from "lucide-react";
-import { PILLAR_NAV, PRIMARY_NAV, type NavItem } from "@/lib/nav";
+import { PILLAR_NAV, PRIMARY_NAV, UTILITY_NAV, type NavItem } from "@/lib/nav";
 import { useUiStore } from "@/lib/store/ui";
 import { cn } from "@/lib/utils";
-
-const UTILITY_NAV: NavItem[] = [
-  { href: "/revision", label: "Revision", icon: Clock },
-  { href: "/mock", label: "Mocks", icon: Mic },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
 
 function NavLink({
   item,

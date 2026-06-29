@@ -2,12 +2,16 @@ import {
   Binary,
   Boxes,
   CalendarRange,
+  Clock,
   FileText,
   LayoutDashboard,
+  Library,
   type LucideIcon,
   MessagesSquare,
+  Mic,
   Network,
   Server,
+  Settings,
   Sparkles,
 } from "lucide-react";
 
@@ -42,4 +46,12 @@ export const PILLAR_NAV: NavItem[] = [
   { href: "/backend-engineering", label: "Backend Eng", icon: Server, pillar: "backend" },
   { href: "/behavioral", label: "Behavioral", icon: MessagesSquare, pillar: "behavioral" },
   { href: "/resume", label: "Resume", icon: FileText, pillar: "resume" },
+];
+
+/** Utility nav — secondary destinations pinned to the sidebar bottom. */
+export const UTILITY_NAV: NavItem[] = [
+  { href: "/resources", label: "Resources", icon: Library },
+  { href: "/revision", label: "Revision", icon: Clock },
+  { href: "/mock", label: "Mocks", icon: Mic },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];

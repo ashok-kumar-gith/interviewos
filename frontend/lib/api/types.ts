@@ -9,6 +9,21 @@ export type { PillarType };
 
 export type Difficulty = "easy" | "medium" | "hard";
 export type Priority = "low" | "medium" | "high" | "critical";
+export type ProgressStatus =
+  | "not_started"
+  | "in_progress"
+  | "completed"
+  | "needs_review";
+export type ResourceType =
+  | "book"
+  | "video"
+  | "article"
+  | "course"
+  | "github"
+  | "practice"
+  | "documentation"
+  | "blog"
+  | "cheatsheet";
 export type TaskKind = "study" | "solve" | "read" | "watch" | "revise" | "mock";
 export type TaskStatus =
   | "pending"
