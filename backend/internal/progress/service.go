@@ -7,17 +7,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// RevisionScheduler is the optional port the progress service uses to schedule a
+// spaced-repetition revision item when a learning task is completed. It is
+// satisfied by *revision.Service. The dependency is nil-safe: progress can be
+// constructed without it (e.g. in tests) and simply skips scheduling.
+type RevisionScheduler interface {
+	ScheduleForCompletion(ctx context.Context, userID uuid.UUID, itemType, itemID, pillarType string) error
+}
+
 // Service implements the progress/Today/dashboard use-cases. It orchestrates the
 // Repository and applies the readiness model (03-ARCHITECTURE.md §8.1, ADR D15).
 type Service struct {
-	repo Repository
-	now  func() time.Time
+	repo     Repository
+	revision RevisionScheduler
+	now      func() time.Time
 }
 
 // ServiceConfig configures a Service.
 type ServiceConfig struct {
 	Repo Repository
-	Now  func() time.Time
+	// Revision is the optional spaced-repetition scheduler invoked on learning-
+	// task completion. nil disables scheduling (progress stays fully functional).
+	Revision RevisionScheduler
+	Now      func() time.Time
 }
 
 // NewService constructs a Service.
@@ -26,7 +38,30 @@ func NewService(cfg ServiceConfig) *Service {
 	if nowFn == nil {
 		nowFn = time.Now
 	}
-	return &Service{repo: cfg.Repo, now: nowFn}
+	return &Service{repo: cfg.Repo, revision: cfg.Revision, now: nowFn}
+}
+
+// learningKinds are the task kinds that represent learning a content item and
+// therefore schedule a revision (study/read/watch). solve/mock/revise do not
+// create revisions (ADR / SRS §6.1 — only learning items are revised).
+var learningKinds = map[string]struct{}{
+	"study": {},
+	"read":  {},
+	"watch": {},
+}
+
+// isLearningTask reports whether a completed task should schedule a revision: a
+// learning kind on a schedulable content item type.
+func isLearningTask(kind, itemType string) bool {
+	if _, ok := learningKinds[kind]; !ok {
+		return false
+	}
+	switch itemType {
+	case "topic", "subtopic", "design_problem", "lld_problem", "problem":
+		return true
+	default:
+		return false
+	}
 }
 
 // CompleteParams is the validated input to CompleteTask.
@@ -65,6 +100,17 @@ func (s *Service) CompleteTask(ctx context.Context, userID, taskID uuid.UUID, p 
 	if err != nil {
 		return nil, Streak{}, err
 	}
+
+	// Schedule a spaced-repetition revision for completed LEARNING items only
+	// (study/read/watch on a content item). The scheduler is optional/idempotent
+	// (deduped on the active unique index), so a failure here must not fail the
+	// completion that already committed.
+	if s.revision != nil && isLearningTask(task.Kind, task.ItemType) {
+		if serr := s.revision.ScheduleForCompletion(ctx, userID, task.ItemType, task.ItemID.String(), task.PillarType); serr != nil {
+			return nil, Streak{}, serr
+		}
+	}
+
 	streak, err := s.repo.ComputeStreak(ctx, userID, now)
 	if err != nil {
 		return nil, Streak{}, err

@@ -18,21 +18,24 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/interviewos/backend/internal/analytics"
 	"github.com/interviewos/backend/internal/auth"
 	"github.com/interviewos/backend/internal/behavioral"
+	"github.com/interviewos/backend/internal/company"
 	"github.com/interviewos/backend/internal/content"
 	"github.com/interviewos/backend/internal/designproblems"
 	"github.com/interviewos/backend/internal/intake"
 	"github.com/interviewos/backend/internal/lld"
 	"github.com/interviewos/backend/internal/mock"
 	"github.com/interviewos/backend/internal/notification"
-	"github.com/interviewos/backend/internal/progress"
-	"github.com/interviewos/backend/internal/resume"
-	"github.com/interviewos/backend/internal/roadmap"
 	"github.com/interviewos/backend/internal/platform/config"
 	"github.com/interviewos/backend/internal/platform/database"
 	"github.com/interviewos/backend/internal/platform/logger"
 	"github.com/interviewos/backend/internal/platform/server"
+	"github.com/interviewos/backend/internal/progress"
+	"github.com/interviewos/backend/internal/resume"
+	"github.com/interviewos/backend/internal/revision"
+	"github.com/interviewos/backend/internal/roadmap"
 )
 
 func main() {
@@ -129,12 +132,25 @@ func run() error {
 			Tokens: tokens,
 		}))
 
+		// Revision Engine (spaced repetition). Built before progress so it can be
+		// injected as the optional learning-completion scheduler (ADR D1/D2/D3,
+		// SRS §6.1). It also serves GET /revision/due and POST /revision/{id}/recall.
+		revisionSvc := revision.NewService(revision.ServiceConfig{Repo: revision.NewRepository(db)})
+		registrars = append(registrars, revision.NewHandler(revision.HandlerConfig{
+			Service: revisionSvc,
+			Tokens:  tokens,
+		}))
+
 		// Progress / Today / Dashboard module. Owns task completion (transactional
 		// progress + session + streak upserts), the Today view, and the dashboard
-		// aggregate (readiness via the SRS multiplicative form, ADR D15).
+		// aggregate (readiness via the SRS multiplicative form, ADR D15). On
+		// learning-task completion it schedules a revision via revisionSvc.
 		registrars = append(registrars, progress.NewHandler(progress.HandlerConfig{
-			Service: progress.NewService(progress.ServiceConfig{Repo: progress.NewRepository(db)}),
-			Tokens:  tokens,
+			Service: progress.NewService(progress.ServiceConfig{
+				Repo:     progress.NewRepository(db),
+				Revision: revisionSvc,
+			}),
+			Tokens: tokens,
 		}))
 
 		// Design Problems (HLD) catalog — read-only, public.
@@ -154,6 +170,18 @@ func run() error {
 		// Notifications module (user-scoped, in-app channel).
 		registrars = append(registrars, notification.NewHandler(notification.HandlerConfig{
 			Service: notification.NewService(notification.ServiceConfig{Repo: notification.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
+
+		// Analytics module (readiness, snapshots, weak/strong topics, time-spent).
+		registrars = append(registrars, analytics.NewHandler(analytics.HandlerConfig{
+			Service: analytics.NewService(analytics.ServiceConfig{Repo: analytics.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
+
+		// Company Mode (set/get target company; re-weights roadmap generation).
+		registrars = append(registrars, company.NewHandler(company.HandlerConfig{
+			Service: company.NewService(company.ServiceConfig{Repo: company.NewRepository(db)}),
 			Tokens:  tokens,
 		}))
 	} else {

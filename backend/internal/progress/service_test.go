@@ -282,3 +282,81 @@ func TestComputeStreakFromDates(t *testing.T) {
 		t.Fatalf("expected 0/0 for empty, got %d/%d", s.Current, s.Longest)
 	}
 }
+
+// --- revision-hook tests ---
+
+type fakeScheduler struct {
+	calls    int
+	itemType string
+	itemID   string
+	pillar   string
+	err      error
+}
+
+func (f *fakeScheduler) ScheduleForCompletion(_ context.Context, _ uuid.UUID, itemType, itemID, pillarType string) error {
+	f.calls++
+	f.itemType, f.itemID, f.pillar = itemType, itemID, pillarType
+	return f.err
+}
+
+// TestCompleteTask_SchedulesRevisionForLearningTask verifies a completed STUDY
+// task on a topic triggers the revision scheduler with the task's poly fields.
+func TestCompleteTask_SchedulesRevisionForLearningTask(t *testing.T) {
+	task := newTask() // kind=study, item_type=topic
+	repo := &fakeRepo{task: task, streak: Streak{Current: 1, Longest: 1}}
+	sched := &fakeScheduler{}
+	svc := NewService(ServiceConfig{Repo: repo, Revision: sched, Now: fixedNow})
+
+	if _, _, err := svc.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 4, TimeSpentMinutes: 30}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if sched.calls != 1 {
+		t.Fatalf("scheduler calls = %d, want 1", sched.calls)
+	}
+	if sched.itemType != "topic" || sched.itemID != task.ItemID.String() || sched.pillar != "dsa" {
+		t.Fatalf("scheduler got %s/%s/%s, want topic/%s/dsa", sched.itemType, sched.itemID, sched.pillar, task.ItemID)
+	}
+}
+
+// TestCompleteTask_NoRevisionForSolveKind ensures non-learning kinds (solve)
+// do not schedule a revision.
+func TestCompleteTask_NoRevisionForSolveKind(t *testing.T) {
+	task := newTask()
+	task.Kind = "solve"
+	task.ItemType = "problem"
+	repo := &fakeRepo{task: task}
+	sched := &fakeScheduler{}
+	svc := NewService(ServiceConfig{Repo: repo, Revision: sched, Now: fixedNow})
+
+	if _, _, err := svc.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 3, TimeSpentMinutes: 20}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if sched.calls != 0 {
+		t.Fatalf("scheduler calls = %d, want 0 for solve kind", sched.calls)
+	}
+}
+
+// TestCompleteTask_NilSchedulerIsSafe ensures progress works without a scheduler.
+func TestCompleteTask_NilSchedulerIsSafe(t *testing.T) {
+	task := newTask()
+	repo := &fakeRepo{task: task}
+	svc := NewService(ServiceConfig{Repo: repo, Now: fixedNow}) // no Revision
+	if _, _, err := svc.CompleteTask(context.Background(), task.UserID, task.ID, CompleteParams{Confidence: 5, TimeSpentMinutes: 10}); err != nil {
+		t.Fatalf("complete with nil scheduler: %v", err)
+	}
+}
+
+func TestIsLearningTask(t *testing.T) {
+	learn := [][2]string{{"study", "topic"}, {"read", "subtopic"}, {"watch", "design_problem"}, {"study", "lld_problem"}, {"study", "problem"}}
+	for _, c := range learn {
+		if !isLearningTask(c[0], c[1]) {
+			t.Fatalf("expected learning: %s/%s", c[0], c[1])
+		}
+	}
+	notLearn := [][2]string{{"solve", "problem"}, {"mock", "topic"}, {"revise", "topic"}, {"study", "resource"}, {"study", "behavioral_story"}}
+	for _, c := range notLearn {
+		if isLearningTask(c[0], c[1]) {
+			t.Fatalf("expected non-learning: %s/%s", c[0], c[1])
+		}
+	}
+}
