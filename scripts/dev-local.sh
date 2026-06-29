@@ -54,7 +54,7 @@ case "${1:-}" in
   backend)  cd "$ROOT/backend" && exec go run ./cmd/api ;;
   migrate)  cd "$ROOT/backend" && exec go run ./cmd/migrate ;;
   seed)     cd "$ROOT/backend" && exec go run ./cmd/seed ;;
-  frontend) cd "$ROOT/frontend" && exec npm run dev ;;
+  frontend) cd "$ROOT/frontend" && rm -rf .next && exec npm run dev ;;
   status)
     echo "postgres: $("$PGBIN/pg_isready" -p "$PGPORT" -h /tmp 2>&1 || true)"
     echo "redis: $("$REDISBIN/redis-cli" -p "$REDIS_PORT" ping 2>&1 || true)"
