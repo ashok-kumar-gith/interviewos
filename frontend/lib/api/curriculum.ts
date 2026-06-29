@@ -137,6 +137,15 @@ export function getActiveRoadmap(): Promise<Roadmap> {
   return api.get<Roadmap>("/roadmaps/active");
 }
 
+/**
+ * POST /roadmaps/generate — build (or regenerate) the active roadmap from the
+ * user's saved profile. Called after intake so a plan actually exists; pass
+ * `regenerate: true` to rebuild an existing one.
+ */
+export function generateRoadmap(body: { regenerate?: boolean } = {}): Promise<Roadmap> {
+  return api.post<Roadmap>("/roadmaps/generate", body);
+}
+
 /** GET /roadmaps/{roadmapId}/weeks/{weekNumber} — a week with its days/tasks. */
 export function getRoadmapWeek(roadmapId: string, weekNumber: number): Promise<RoadmapWeek> {
   return api.get<RoadmapWeek>(`/roadmaps/${roadmapId}/weeks/${weekNumber}`);

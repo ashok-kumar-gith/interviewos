@@ -26,6 +26,7 @@ import {
   type PillarStrengths,
   type UserProfileUpsert,
 } from "@/lib/api/profile";
+import { generateRoadmap } from "@/lib/api/curriculum";
 
 /* -------------------------------------------------------------------------- */
 /* Form model + validation                                                    */
@@ -152,7 +153,9 @@ export default function IntakePage() {
         pillar_strengths: pillarStrengths,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       };
-      return upsertProfile(payload);
+      // Save the profile, then generate the roadmap from it so a plan actually
+      // exists (the dashboard/today/roadmap views are empty without one).
+      return upsertProfile(payload).then(() => generateRoadmap());
     },
     onSuccess: () => {
       router.push("/dashboard");

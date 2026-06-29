@@ -1,8 +1,9 @@
 "use client";
 
-import { Command, Flame, Moon, PanelLeft, Search, Sun, User } from "lucide-react";
+import { Command, Flame, Moon, PanelLeft, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/shell/notification-bell";
+import { ProfileMenu } from "@/components/shell/profile-menu";
 import { useUiStore } from "@/lib/store/ui";
 import { useCommandStore } from "@/lib/store/command";
 
@@ -64,9 +65,7 @@ export function Topbar() {
         {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
       </Button>
 
-      <Button variant="ghost" size="icon" className="size-8" aria-label="Profile menu">
-        <User className="size-4" />
-      </Button>
+      <ProfileMenu />
     </header>
   );
 }

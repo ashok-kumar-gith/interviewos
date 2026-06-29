@@ -42,10 +42,18 @@ export default function DashboardPage() {
     return <DashboardSkeleton />;
   }
 
-  // No profile/roadmap yet → onboarding CTA. The backend may return 404 or an
-  // empty-ish aggregate before a roadmap exists.
+  // No profile/roadmap yet → onboarding CTA. The backend returns 404 in some
+  // cases, but GetDashboard also returns 200 with an all-empty aggregate before
+  // a roadmap exists — treat that as "needs onboarding" too, otherwise a brand
+  // new user lands on a zeroed dashboard with no way forward.
   const notFound = query.error instanceof ApiError && query.error.status === 404;
-  if (notFound) {
+  const d = query.data;
+  const emptyAggregate =
+    !query.isError &&
+    !!d &&
+    (d.pillar_readiness?.length ?? 0) === 0 &&
+    (d.today?.total_tasks ?? 0) === 0;
+  if (notFound || emptyAggregate) {
     return (
       <div className="space-y-8">
         <header>
