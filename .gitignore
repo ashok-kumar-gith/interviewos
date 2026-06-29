@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+/frontend/.next/
+/frontend/out/
+/frontend/dist/
+
+# Go
+/backend/bin/
+/backend/tmp/
+*.test
+*.out
+vendor/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Build / coverage
+coverage/
+*.coverage
+dist/
+build/
+
+# Docker volumes (local)
+/infra/data/

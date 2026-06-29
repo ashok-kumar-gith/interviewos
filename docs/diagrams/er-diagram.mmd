@@ -1,0 +1,174 @@
+erDiagram
+    users ||--o{ oauth_accounts : has
+    users ||--o{ refresh_tokens : has
+    users ||--o{ password_reset_tokens : has
+    users ||--|| user_profiles : "intake"
+    users ||--o{ roadmaps : owns
+    users ||--o{ user_topic_progress : tracks
+    users ||--o{ user_problem_progress : tracks
+    users ||--o{ revision_items : schedules
+    users ||--o{ notes : writes
+    users ||--o{ attachments : uploads
+    users ||--o{ behavioral_stories : authors
+    users ||--|| resume_profiles : has
+    users ||--o{ mock_interviews : records
+    users ||--o{ study_sessions : logs
+    users ||--o{ streak_days : has
+    users ||--o{ readiness_snapshots : has
+    users ||--o{ notifications : receives
+    users ||--o{ ai_invocations : invokes
+
+    tracks ||--o{ pillars : contains
+    pillars ||--o{ topics : contains
+    topics ||--o{ subtopics : contains
+    topics ||--o{ topic_resources : links
+    resources ||--o{ topic_resources : linked
+    tracks ||--o{ problems : contains
+    topics ||--o{ problems : groups
+    problems ||--o{ problem_patterns : tagged
+    patterns ||--o{ problem_patterns : tags
+    problems ||--o{ problem_sources : sourced
+    problems ||--o{ problem_company_frequency : asked
+    companies ||--o{ problem_company_frequency : asks
+    companies ||--o{ company_weights : weights
+    pillars ||--o{ company_weights : weighted
+    topics ||--o{ company_weights : weighted
+    tracks ||--o{ design_problems : contains
+    tracks ||--o{ lld_problems : contains
+
+    user_profiles ||--o{ roadmaps : drives
+    companies ||--o{ roadmaps : targets
+    roadmaps ||--o{ roadmap_weeks : contains
+    roadmap_weeks ||--o{ plan_days : contains
+    plan_days ||--o{ plan_tasks : contains
+    revision_items ||--o{ plan_tasks : "revise tasks"
+    plan_tasks ||--o{ study_sessions : timed
+    resume_profiles ||--o{ resume_projects : contains
+    mock_interviews ||--o{ mock_findings : yields
+    roadmaps ||--o{ readiness_snapshots : measured
+
+    users {
+        uuid id PK
+        citext email UK
+        text password_hash
+        text full_name
+        user_role role
+        account_status status
+    }
+    user_profiles {
+        uuid id PK
+        uuid user_id FK
+        uuid track_id FK
+        uuid target_company_id FK
+        numeric years_experience
+        smallint hours_per_week
+        date start_date
+        smallint target_weeks
+        jsonb pillar_strengths
+    }
+    tracks {
+        uuid id PK
+        text slug UK
+        text name
+        text seniority
+    }
+    pillars {
+        uuid id PK
+        uuid track_id FK
+        pillar_type type
+        numeric weight
+    }
+    topics {
+        uuid id PK
+        uuid pillar_id FK
+        uuid track_id FK
+        text slug
+        difficulty difficulty
+        priority priority
+    }
+    problems {
+        uuid id PK
+        uuid track_id FK
+        uuid topic_id FK
+        text slug UK
+        difficulty difficulty
+        numeric frequency_score
+    }
+    patterns {
+        uuid id PK
+        text slug UK
+        text name
+    }
+    companies {
+        uuid id PK
+        text slug UK
+        boolean is_fully_weighted
+    }
+    roadmaps {
+        uuid id PK
+        uuid user_id FK
+        uuid track_id FK
+        uuid profile_id FK
+        date start_date
+        boolean is_active
+    }
+    roadmap_weeks {
+        uuid id PK
+        uuid roadmap_id FK
+        smallint week_number
+    }
+    plan_days {
+        uuid id PK
+        uuid roadmap_week_id FK
+        uuid user_id FK
+        date date
+    }
+    plan_tasks {
+        uuid id PK
+        uuid plan_day_id FK
+        uuid user_id FK
+        task_kind kind
+        plan_item_type item_type
+        uuid item_id
+        task_status status
+        smallint confidence
+    }
+    revision_items {
+        uuid id PK
+        uuid user_id FK
+        plan_item_type item_type
+        uuid item_id
+        smallint interval_days
+        date due_at
+    }
+    user_topic_progress {
+        uuid id PK
+        uuid user_id FK
+        uuid topic_id FK
+        progress_status status
+        smallint confidence
+    }
+    user_problem_progress {
+        uuid id PK
+        uuid user_id FK
+        uuid problem_id FK
+        progress_status status
+        boolean solved
+    }
+    behavioral_stories {
+        uuid id PK
+        uuid user_id FK
+        story_theme theme
+    }
+    mock_interviews {
+        uuid id PK
+        uuid user_id FK
+        mock_type type
+        mock_outcome outcome
+    }
+    readiness_snapshots {
+        uuid id PK
+        uuid user_id FK
+        date snapshot_date
+        numeric overall_readiness
+    }
