@@ -1,0 +1,42 @@
+{{- if .Values.ingress.enabled -}}
+{{- $backendSvc := include "interviewos.componentName" (dict "ctx" . "component" "backend") -}}
+{{- $frontendSvc := include "interviewos.componentName" (dict "ctx" . "component" "frontend") -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "interviewos.fullname" . }}
+  labels:
+    {{- include "interviewos.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host | quote }}
+      http:
+        paths:
+          {{- range $path := list "/api" "/healthz" "/readyz" "/swagger" "/metrics" }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $backendSvc }}
+                port:
+                  number: {{ $.Values.backend.service.port }}
+          {{- end }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $frontendSvc }}
+                port:
+                  number: {{ .Values.frontend.service.port }}
+{{- end -}}

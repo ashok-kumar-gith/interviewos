@@ -1,12 +1,11 @@
 // Package server assembles the Gin HTTP engine: it wires the middleware chain
-// (request-id, structured logging, recovery, CORS) and registers the route
-// groups (health/readiness probes, the versioned /api/v1 API group, and the
-// Swagger placeholder). Composition of concrete dependencies happens in cmd/api.
+// (request-id, security headers, metrics, structured logging, recovery, CORS)
+// and registers the route groups (health/readiness probes, Prometheus /metrics,
+// the Swagger UI, and the versioned /api/v1 API group). Composition of concrete
+// dependencies happens in cmd/api.
 package server
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -43,34 +42,46 @@ func New(opts Options) *gin.Engine {
 
 	// gin.New() (not Default) so we install our own logger/recovery middleware.
 	engine := gin.New()
+
+	// Middleware chain order (outermost first): request-id establishes the
+	// correlation ID; security headers are set early so they apply even to error
+	// responses; metrics observes the full handler latency (via c.FullPath());
+	// logging emits the structured access line; recovery converts panics to a
+	// clean 500; CORS applies the origin allowlist last before routing.
+	var metrics *Metrics
+	engine.Use(RequestID())
+	engine.Use(SecurityHeaders(opts.Config.IsProduction()))
+	if opts.Config.MetricsEnabled {
+		metrics = NewMetrics()
+		engine.Use(metrics.Middleware())
+	}
 	engine.Use(
-		RequestID(),
 		Logger(opts.Logger),
 		Recovery(opts.Logger),
 		CORS(opts.Config.CORSOrigins),
 	)
 
-	RegisterRoutes(engine, opts)
+	RegisterRoutes(engine, opts, metrics)
 	return engine
 }
 
-// RegisterRoutes mounts the liveness/readiness probes, the Swagger placeholder,
-// and the versioned /api/v1 group onto the engine. Feature modules will attach
-// their routes to the v1 group at composition time in later milestones.
-func RegisterRoutes(engine *gin.Engine, opts Options) {
+// RegisterRoutes mounts the liveness/readiness probes, the Prometheus /metrics
+// endpoint, the Swagger UI, and the versioned /api/v1 group onto the engine.
+// /healthz, /readyz, /metrics and the docs are unauthenticated and cheap.
+func RegisterRoutes(engine *gin.Engine, opts Options, metrics *Metrics) {
 	health := NewHealthHandler(opts.DB, opts.Redis)
 
 	// Liveness and readiness probes (unversioned, used by orchestrators).
 	engine.GET("/healthz", health.Healthz)
 	engine.GET("/readyz", health.Readyz)
 
-	// Swagger placeholder. The OpenAPI source of truth lives at api/openapi.yaml;
-	// interactive docs will be served here in a later milestone.
-	engine.GET("/swagger", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "Swagger UI not yet wired; see backend/api/openapi.yaml",
-		})
-	})
+	// Prometheus exposition — mounted outside any auth group, no auth.
+	if metrics != nil {
+		engine.GET("/metrics", metrics.Handler())
+	}
+
+	// Interactive API docs backed by the embedded OpenAPI spec.
+	RegisterSwagger(engine)
 
 	// Versioned API group. Feature modules mount their routes here.
 	v1 := engine.Group("/api/v1")

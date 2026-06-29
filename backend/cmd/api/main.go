@@ -97,7 +97,7 @@ func run() error {
 			return terr
 		}
 
-		registrars = append(registrars, buildAuthModule(cfg, log, db, tokens))
+		registrars = append(registrars, buildAuthModule(cfg, log, db, rdb, tokens))
 
 		// Content / Curriculum browsing module (read-only).
 		registrars = append(registrars,
@@ -295,7 +295,7 @@ func buildTokenManager(cfg *config.Config) (*auth.TokenManager, error) {
 
 // buildAuthModule wires the auth repository, mailer, OAuth registry, service,
 // and HTTP handler from configuration and the shared token manager.
-func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, tokens *auth.TokenManager) *auth.Handler {
+func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redis.Client, tokens *auth.TokenManager) *auth.Handler {
 	repo := auth.NewRepository(db)
 	mailer := auth.NewLogMailer(log)
 	// No live OAuth credentials locally: register unconfigured providers so the
@@ -311,9 +311,14 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, tokens *a
 		OAuth:  oauthReg,
 		Logger: log,
 	})
+	// Stricter per-IP rate limit on credential-sensitive auth endpoints. Uses
+	// Redis when available (correct across replicas), in-memory otherwise.
+	authRL := server.RateLimit(rdb, cfg.AuthRateLimitPerMin, "auth")
+
 	return auth.NewHandler(auth.HandlerConfig{
 		Service:       svc,
 		Tokens:        tokens,
 		SecureCookies: cfg.IsProduction(),
+		RateLimit:     authRL,
 	})
 }

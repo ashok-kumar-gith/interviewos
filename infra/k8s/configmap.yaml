@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: interviewos-config
+  namespace: interviewos
+  labels:
+    app.kubernetes.io/part-of: interviewos
+# Non-secret runtime configuration (12-factor). Secrets (JWT_SECRET, DB creds,
+# ANTHROPIC_API_KEY) live in the Secret, not here. Values mirror the env vars
+# read by backend/internal/platform/config and the frontend.
+data:
+  # --- backend ---
+  ENV: "production"
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  # DATABASE_URL / REDIS_URL point at the in-cluster Postgres + Redis Services.
+  # The password component is intentionally a placeholder; the real DSN is
+  # assembled by the backend from these plus the DB password Secret if you
+  # prefer split creds. For simplicity here the full DSN lives in the Secret.
+  REDIS_URL: "redis://interviewos-redis:6379/0"
+  CORS_ORIGINS: "https://interviewos.example.com"
+  ACCESS_TOKEN_TTL: "15m"
+  REFRESH_TOKEN_TTL: "720h"
+  RESET_TOKEN_TTL: "1h"
+  AI_MODEL: "claude-opus-4-8"
+  AI_ENABLED: "true"
+  # --- frontend ---
+  NEXT_PUBLIC_API_BASE_URL: "https://interviewos.example.com"

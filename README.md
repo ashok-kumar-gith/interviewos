@@ -17,9 +17,35 @@ timeline.
 
 ## Status
 
-🚧 **In active development.** Phase 1 (planning & design) deliverables are complete
-and live in [`docs/`](./docs). Implementation follows the milestone plan in the
-[Development Roadmap](./docs/07-ROADMAP.md).
+🚧 **In active development — hardening for GA.** The full planning set lives in
+[`docs/`](./docs) and the product is built through the milestone plan: **M0
+(Foundation + Auth), M1 (Curriculum core), M2 (Engines), M3 (Depth modules), and
+M4 (Polish & AI) are implemented; M5 (hardening, infra, docs, deploy) is in
+progress.** See the [Development Roadmap](./docs/07-ROADMAP.md).
+
+The backend is a Go modular monolith (Gin + GORM) with 20+ domain modules,
+migrations `000001`–`000014`, and a contract-first OpenAPI spec; the frontend is
+a Next.js 15 / React 19 SPA. Both run locally via Docker (`make dev`) **or** a
+sudo-free `~/.local` toolchain (`scripts/dev-local.sh`) on machines without Docker.
+
+### Live endpoints (backend)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/api/v1/*` | REST API (auth, intake, roadmap, today, pillars, revision, analytics, …) |
+| `/healthz` | liveness (process up) |
+| `/readyz` | readiness (Postgres + Redis reachable, migrations applied) |
+| `/metrics` | Prometheus metrics |
+| `/swagger` | live Swagger UI |
+
+### Operational & contributor docs
+
+| Doc | Purpose |
+|-----|---------|
+| [SETUP.md](./docs/SETUP.md) | local dev — Docker (`make dev`) **and** sudo-free `~/.local` path; env vars; migrate/seed; tests |
+| [DEPLOYMENT.md](./docs/DEPLOYMENT.md) | docker-compose prod, Kubernetes (kubectl + Kustomize), Helm, secrets, health/metrics/Swagger |
+| [DEVELOPER.md](./docs/DEVELOPER.md) | architecture, module layout, the 7-stage feature flow, testing strategy (incl. the `-p 1` note), OpenAPI-first |
+| [CLAUDE.md](./CLAUDE.md) | concise contributor/agent guide: commands, conventions, where things live |
 
 ## Planning & design documents
 
@@ -61,7 +87,7 @@ shadcn/ui · TanStack Table · React Query · Zustand · React Hook Form · Rech
 **Backend:** Go · Gin · PostgreSQL · Redis · GORM · JWT · Swagger/OpenAPI
 
 **Infra:** Docker · Docker Compose · GitHub Actions · Makefile · Nginx ·
-(optional) Kubernetes + Helm
+Kubernetes (Kustomize) + Helm (`infra/k8s/`, `infra/helm/interviewos/`)
 
 ## Monorepo layout
 
@@ -72,23 +98,37 @@ interviewos/
 ├── backend/         # Go API (clean architecture: cmd/{api,migrate,seed}, internal/<module>, pkg/, migrations/)
 │   └── api/         # openapi.yaml — contract source of truth (maintained with the backend)
 ├── frontend/        # Next.js app (app/, features/, components/, lib/)
-├── infra/           # docker-compose.yml, nginx, k8s, helm
-├── Makefile         # dev/build/test targets (repo root)
+├── infra/           # docker-compose.yml, nginx/, k8s/ (kustomize), helm/interviewos/
+├── scripts/         # dev-local.sh — sudo-free local stack (no Docker)
+├── Makefile         # dev/build/test/migrate/seed/k8s/helm targets (repo root)
+├── CLAUDE.md        # contributor / agent quick reference
 └── .github/         # CI/CD workflows
 ```
 
 ## Getting started
 
-> Local development setup lands with Milestone **M0 (Foundation)**. Once available:
->
-> ```bash
-> make dev        # boots postgres, redis, backend, frontend, nginx via infra/docker-compose.yml
-> make migrate    # runs database migrations
-> make seed       # loads DSA + System Design curriculum seed
-> make test       # runs backend + frontend test suites
-> ```
->
-> See [Roadmap → M0](./docs/07-ROADMAP.md) for the exact bootstrap sequence.
+**With Docker:**
+
+```bash
+make dev        # boots postgres, redis, mailhog, backend, frontend, nginx via infra/docker-compose.yml
+make migrate    # applies database migrations (cmd/migrate up)
+make seed       # loads DSA + System Design curriculum seed (idempotent)
+make be-test    # backend unit tests   (make be-test-integration for serial -p 1 tests)
+make fe-build   # frontend build
+```
+
+**Without Docker (sudo-free `~/.local` toolchain):**
+
+```bash
+scripts/dev-local.sh start-db    # postgres (:5433) + redis (:6379) from ~/.local
+scripts/dev-local.sh migrate     # apply migrations
+scripts/dev-local.sh seed        # load seed
+scripts/dev-local.sh backend     # run the Go API (:8080)
+scripts/dev-local.sh frontend    # run the Next.js dev server (:3000)
+```
+
+See [SETUP.md](./docs/SETUP.md) for the full bootstrap, env vars, and both paths;
+[DEPLOYMENT.md](./docs/DEPLOYMENT.md) for Kubernetes/Helm/compose deploys.
 
 ## Development process
 

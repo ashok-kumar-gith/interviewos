@@ -1,0 +1,61 @@
+# Nginx ingress: routes the public host to frontend (/) and backend
+# (/api, /healthz, /readyz, /swagger, /metrics). Requires an ingress-nginx
+# controller in the cluster. For TLS, add cert-manager and a tls: block (see
+# docs/DEPLOYMENT.md). Update the host to match your domain + CORS_ORIGINS.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: interviewos
+  namespace: interviewos
+  labels:
+    app.kubernetes.io/part-of: interviewos
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: interviewos.example.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: interviewos-backend
+                port:
+                  number: 8080
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: interviewos-backend
+                port:
+                  number: 8080
+          - path: /readyz
+            pathType: Prefix
+            backend:
+              service:
+                name: interviewos-backend
+                port:
+                  number: 8080
+          - path: /swagger
+            pathType: Prefix
+            backend:
+              service:
+                name: interviewos-backend
+                port:
+                  number: 8080
+          - path: /metrics
+            pathType: Prefix
+            backend:
+              service:
+                name: interviewos-backend
+                port:
+                  number: 8080
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: interviewos-frontend
+                port:
+                  number: 3000

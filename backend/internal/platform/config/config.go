@@ -44,6 +44,15 @@ type Config struct {
 	// AIEnabled gates the AI augmentation. When false (or when AnthropicAPIKey is
 	// empty) every /ai/* feature serves the deterministic fallback.
 	AIEnabled bool
+	// MetricsEnabled gates the Prometheus metrics middleware and /metrics
+	// endpoint. Default true.
+	MetricsEnabled bool
+	// RateLimitPerMin is the default per-IP request budget per minute applied to
+	// general endpoints. Default 60.
+	RateLimitPerMin int
+	// AuthRateLimitPerMin is the stricter per-IP request budget per minute applied
+	// to sensitive auth endpoints (login/register/forgot-password). Default 10.
+	AuthRateLimitPerMin int
 }
 
 // Environment helpers.
@@ -74,6 +83,9 @@ func Load() (*Config, error) {
 	v.SetDefault("ANTHROPIC_API_KEY", "")
 	v.SetDefault("AI_MODEL", "claude-sonnet-4-6")
 	v.SetDefault("AI_ENABLED", true)
+	v.SetDefault("METRICS_ENABLED", true)
+	v.SetDefault("RATE_LIMIT_PER_MIN", 60)
+	v.SetDefault("AUTH_RATE_LIMIT_PER_MIN", 10)
 
 	// Optional .env support for local dev. Missing file is not an error.
 	v.SetConfigName(".env")
@@ -102,9 +114,20 @@ func Load() (*Config, error) {
 		AnthropicAPIKey: strings.TrimSpace(v.GetString("ANTHROPIC_API_KEY")),
 		AIModel:         strings.TrimSpace(v.GetString("AI_MODEL")),
 		AIEnabled:       v.GetBool("AI_ENABLED"),
+
+		MetricsEnabled:      v.GetBool("METRICS_ENABLED"),
+		RateLimitPerMin:     v.GetInt("RATE_LIMIT_PER_MIN"),
+		AuthRateLimitPerMin: v.GetInt("AUTH_RATE_LIMIT_PER_MIN"),
 	}
 	if cfg.AIModel == "" {
 		cfg.AIModel = "claude-sonnet-4-6"
+	}
+	// Guard against non-positive overrides; fall back to safe defaults.
+	if cfg.RateLimitPerMin <= 0 {
+		cfg.RateLimitPerMin = 60
+	}
+	if cfg.AuthRateLimitPerMin <= 0 {
+		cfg.AuthRateLimitPerMin = 10
 	}
 
 	var err error

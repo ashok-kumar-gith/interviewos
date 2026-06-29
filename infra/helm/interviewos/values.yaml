@@ -1,0 +1,153 @@
+# Default values for the InterviewOS Helm chart.
+# Override per environment with `-f values-<env>.yaml` or `--set`.
+
+# nameOverride / fullnameOverride control generated resource names.
+nameOverride: ""
+fullnameOverride: ""
+
+# -----------------------------------------------------------------------------
+# Images
+# -----------------------------------------------------------------------------
+# Keep these as interviewos-backend / interviewos-frontend for local clusters
+# (build + `kind load`), or point repository at your registry and set tag to the
+# build SHA in CD.
+image:
+  pullPolicy: IfNotPresent
+
+backend:
+  image:
+    repository: interviewos-backend
+    tag: latest
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  # Probe paths served by the Go API.
+  livenessPath: /healthz
+  readinessPath: /readyz
+  service:
+    port: 8080
+
+frontend:
+  image:
+    repository: interviewos-frontend
+    tag: latest
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    port: 3000
+
+# -----------------------------------------------------------------------------
+# Database lifecycle Jobs
+# -----------------------------------------------------------------------------
+migrate:
+  enabled: true
+  # Command that applies migrations (backend/cmd/migrate). The backend image
+  # must ship this binary; otherwise override with your own runner.
+  command: ["/app/migrate", "up"]
+seed:
+  enabled: true
+  command: ["/app/seed"]
+
+# -----------------------------------------------------------------------------
+# In-cluster Postgres (disable to use a managed/external database — then set
+# config.databaseUrl / secrets.databaseUrl to the external DSN).
+# -----------------------------------------------------------------------------
+postgres:
+  enabled: true
+  image:
+    repository: postgres
+    tag: 16-alpine
+  storage: 10Gi
+  service:
+    port: 5432
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# -----------------------------------------------------------------------------
+# In-cluster Redis (disable to use a managed/external Redis — then set
+# config.redisUrl accordingly).
+# -----------------------------------------------------------------------------
+redis:
+  enabled: true
+  image:
+    repository: redis
+    tag: 7-alpine
+  service:
+    port: 6379
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# -----------------------------------------------------------------------------
+# Non-secret config (rendered into a ConfigMap). 12-factor env.
+# -----------------------------------------------------------------------------
+config:
+  env: production
+  port: "8080"
+  logLevel: info
+  corsOrigins: https://interviewos.example.com
+  accessTokenTtl: 15m
+  refreshTokenTtl: 720h
+  resetTokenTtl: 1h
+  aiModel: claude-opus-4-8
+  aiEnabled: "true"
+  # Public API base URL the frontend calls. Should match the ingress host.
+  apiBaseUrl: https://interviewos.example.com
+  # Redis DSN. When redis.enabled=true this defaults to the in-cluster service;
+  # set explicitly when using an external Redis.
+  redisUrl: ""
+
+# -----------------------------------------------------------------------------
+# Secrets (rendered into a Secret). PLACEHOLDERS — override for real deploys via
+# --set, a values file kept out of git, or an external-secrets operator. Set
+# secrets.create=false to supply your own pre-existing Secret named
+# "<release>-secrets".
+# -----------------------------------------------------------------------------
+secrets:
+  create: true
+  jwtSecret: "CHANGE_ME_TO_A_LONG_RANDOM_SECRET"
+  anthropicApiKey: ""
+  # Full Postgres DSN. When postgres.enabled=true and this is empty, the chart
+  # assembles it from postgres credentials + the in-cluster service.
+  databaseUrl: ""
+  postgresUser: interviewos
+  postgresPassword: "CHANGE_ME_POSTGRES_PASSWORD"
+  postgresDb: interviewos
+
+# -----------------------------------------------------------------------------
+# Ingress (nginx). Routes / to frontend and /api,/healthz,/readyz,/swagger,
+# /metrics to the backend.
+# -----------------------------------------------------------------------------
+ingress:
+  enabled: true
+  className: nginx
+  host: interviewos.example.com
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+  tls:
+    enabled: false
+    secretName: interviewos-tls
+
+# Pod-level security context applied to app workloads.
+podSecurityContext:
+  runAsNonRoot: true

@@ -1,0 +1,44 @@
+# InterviewOS — raw Kubernetes manifests, tied together with Kustomize.
+#
+# Apply everything:   kubectl apply -k infra/k8s
+# Dry-run (client):   kubectl apply --dry-run=client -k infra/k8s
+# Tear down:          kubectl delete -k infra/k8s
+#
+# IMAGES: the manifests reference interviewos-backend:latest and
+# interviewos-frontend:latest. Build and push them to a registry your cluster
+# can pull (then set `images:` below to the registry path + tag), or for a local
+# kind/minikube cluster build locally and load them:
+#   docker build -t interviewos-backend:latest ./backend
+#   docker build -t interviewos-frontend:latest ./frontend
+#   kind load docker-image interviewos-backend:latest interviewos-frontend:latest
+#
+# SECRETS: secret.yaml holds PLACEHOLDER values. Override before any real deploy
+# (sealed-secrets / external-secrets / kubectl create secret). See docs/DEPLOYMENT.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: interviewos
+
+commonLabels:
+  app.kubernetes.io/part-of: interviewos
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secret.yaml
+  - postgres.yaml
+  - redis.yaml
+  - migrate-job.yaml
+  - backend.yaml
+  - frontend.yaml
+  - ingress.yaml
+
+# Pin image tags centrally. Replace `newName` with your registry path and
+# `newTag` with the build SHA in CD; `latest` is the default for local use.
+images:
+  - name: interviewos-backend
+    newName: interviewos-backend
+    newTag: latest
+  - name: interviewos-frontend
+    newName: interviewos-frontend
+    newTag: latest

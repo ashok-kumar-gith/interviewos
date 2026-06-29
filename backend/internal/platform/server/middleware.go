@@ -1,6 +1,7 @@
 package server
 
 import (
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -100,6 +101,45 @@ func Recovery(log *zap.Logger) gin.HandlerFunc {
 				})
 			}
 		}()
+		c.Next()
+	}
+}
+
+// SecurityHeaders middleware sets conservative response security headers
+// suitable for a JSON API that also serves the self-contained Swagger UI page.
+// HSTS is only emitted when the request is served over TLS (or behind a TLS
+// terminator that sets X-Forwarded-Proto: https), since asserting it on plain
+// HTTP is meaningless and can lock out clients in dev.
+//
+// The Content-Security-Policy is permissive enough for the Swagger UI page,
+// which loads swagger-ui-dist assets from a CDN and inlines bootstrap script;
+// for API (JSON) responses these directives are inert.
+func SecurityHeaders(isProd bool) gin.HandlerFunc {
+	const csp = "default-src 'self'; " +
+		"script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; " +
+		"style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; " +
+		"img-src 'self' data: https:; " +
+		"font-src 'self' data: https:; " +
+		"connect-src 'self'; " +
+		"frame-ancestors 'none'; " +
+		"base-uri 'self'"
+
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", csp)
+
+		// HSTS only when the connection is actually secure.
+		if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+			if isProd {
+				h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+			} else {
+				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+		}
+
 		c.Next()
 	}
 }

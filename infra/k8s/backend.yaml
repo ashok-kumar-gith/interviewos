@@ -1,0 +1,95 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: interviewos-backend
+  namespace: interviewos
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: interviewos
+spec:
+  selector:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: interviewos
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interviewos-backend
+  namespace: interviewos
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: interviewos
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+      app.kubernetes.io/part-of: interviewos
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/part-of: interviewos
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: backend
+          # See kustomization.yaml: build & push this tag, or `kind load` it.
+          image: interviewos-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: interviewos-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: interviewos-secrets
+                  key: DATABASE_URL
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: interviewos-secrets
+                  key: JWT_SECRET
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: interviewos-secrets
+                  key: ANTHROPIC_API_KEY
+          # Liveness: process up (see docs/03-ARCHITECTURE.md §16).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Readiness: DB + Redis reachable, migrations applied. Gates LB membership.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "512Mi"

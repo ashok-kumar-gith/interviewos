@@ -21,6 +21,10 @@ type Handler struct {
 	validate *validator.Validate
 	// secureCookies controls the Secure flag on the refresh cookie (off in dev).
 	secureCookies bool
+	// rateLimit is an optional per-IP rate-limit middleware applied to the
+	// sensitive auth endpoints (register/login/forgot-password/reset-password).
+	// When nil, no rate limiting is applied.
+	rateLimit gin.HandlerFunc
 }
 
 // HandlerConfig configures a Handler.
@@ -28,6 +32,9 @@ type HandlerConfig struct {
 	Service       *Service
 	Tokens        *TokenManager
 	SecureCookies bool
+	// RateLimit, when non-nil, is applied to the credential-sensitive endpoints
+	// to throttle brute-force and abuse from a single IP.
+	RateLimit gin.HandlerFunc
 }
 
 // NewHandler constructs a Handler.
@@ -37,6 +44,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		tokens:        cfg.Tokens,
 		validate:      validator.New(validator.WithRequiredStructEnabled()),
 		secureCookies: cfg.SecureCookies,
+		rateLimit:     cfg.RateLimit,
 	}
 }
 
@@ -94,12 +102,26 @@ type authTokensResponse struct {
 func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	a := v1.Group("/auth")
 	{
-		a.POST("/register", h.Register)
-		a.POST("/login", h.Login)
+		// Credential-sensitive endpoints are rate-limited per IP (brute-force /
+		// abuse mitigation). The limiter is optional (nil in tests / when
+		// disabled), so guard each registration.
+		rl := h.rateLimit
+		register := []gin.HandlerFunc{h.Register}
+		login := []gin.HandlerFunc{h.Login}
+		forgot := []gin.HandlerFunc{h.ForgotPassword}
+		reset := []gin.HandlerFunc{h.ResetPassword}
+		if rl != nil {
+			register = append([]gin.HandlerFunc{rl}, register...)
+			login = append([]gin.HandlerFunc{rl}, login...)
+			forgot = append([]gin.HandlerFunc{rl}, forgot...)
+			reset = append([]gin.HandlerFunc{rl}, reset...)
+		}
+		a.POST("/register", register...)
+		a.POST("/login", login...)
 		a.POST("/refresh", h.Refresh)
 		a.POST("/logout", h.Logout)
-		a.POST("/forgot-password", h.ForgotPassword)
-		a.POST("/reset-password", h.ResetPassword)
+		a.POST("/forgot-password", forgot...)
+		a.POST("/reset-password", reset...)
 		a.GET("/oauth/:provider/callback", h.OAuthCallback)
 		a.GET("/me", RequireAuth(h.tokens), h.Me)
 	}

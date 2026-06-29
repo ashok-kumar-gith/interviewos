@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: interviewos
+  labels:
+    app.kubernetes.io/part-of: interviewos
+    app.kubernetes.io/managed-by: kustomize

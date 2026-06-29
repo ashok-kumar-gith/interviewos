@@ -1,0 +1,85 @@
+# Runs the golang-migrate runner (backend/cmd/migrate) to apply all pending
+# migrations before the API serves traffic. Re-runnable: golang-migrate is a
+# no-op when already at the latest version. The image must contain the `migrate`
+# binary at /app/migrate (or run `go run ./cmd/migrate`); see the note on images
+# in kustomization.yaml. Run with: kubectl apply -f migrate-job.yaml (or via the
+# whole kustomization). Delete + re-apply to re-run on a new image tag.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: interviewos-migrate
+  namespace: interviewos
+  labels:
+    app.kubernetes.io/name: migrate
+    app.kubernetes.io/part-of: interviewos
+spec:
+  backoffLimit: 6
+  # ttlSecondsAfterFinished cleans the Job up after completion.
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: migrate
+        app.kubernetes.io/part-of: interviewos
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: interviewos-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/app/migrate", "up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: interviewos-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+# Optional idempotent content/curriculum seed (backend/cmd/seed). Safe to re-run:
+# every entity is upserted by its natural key. Apply after the migrate Job.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: interviewos-seed
+  namespace: interviewos
+  labels:
+    app.kubernetes.io/name: seed
+    app.kubernetes.io/part-of: interviewos
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: seed
+        app.kubernetes.io/part-of: interviewos
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: seed
+          image: interviewos-backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["/app/seed"]
+          envFrom:
+            - configMapRef:
+                name: interviewos-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: interviewos-secrets
+                  key: DATABASE_URL
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"

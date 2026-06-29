@@ -1,0 +1,48 @@
+InterviewOS has been deployed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Components:
+  - backend   : {{ .Values.backend.replicaCount }} replica(s)  image {{ .Values.backend.image.repository }}:{{ .Values.backend.image.tag }}
+  - frontend  : {{ .Values.frontend.replicaCount }} replica(s)  image {{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}
+  - postgres  : {{ if .Values.postgres.enabled }}in-cluster StatefulSet{{ else }}external (config.* / secrets.databaseUrl){{ end }}
+  - redis     : {{ if .Values.redis.enabled }}in-cluster Deployment{{ else }}external (config.redisUrl){{ end }}
+  - migrate   : {{ if .Values.migrate.enabled }}runs as a pre-install/pre-upgrade hook{{ else }}disabled{{ end }}
+  - seed      : {{ if .Values.seed.enabled }}runs as a pre-install/pre-upgrade hook (idempotent){{ else }}disabled{{ end }}
+
+{{- if .Values.ingress.enabled }}
+
+The app is exposed via Ingress at:
+
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/            (frontend)
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/api         (backend API)
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/swagger     (API docs)
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/healthz      (liveness)
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/readyz       (readiness)
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}/metrics      (Prometheus)
+
+Point a DNS record for {{ .Values.ingress.host }} at your ingress controller's external IP.
+{{- else }}
+
+Ingress is disabled. Port-forward the frontend to reach the app locally:
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "interviewos.componentName" (dict "ctx" . "component" "frontend") }} 3000:{{ .Values.frontend.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "interviewos.componentName" (dict "ctx" . "component" "backend") }} 8080:{{ .Values.backend.service.port }}
+{{- end }}
+
+Check rollout status:
+  kubectl -n {{ .Release.Namespace }} get pods,svc,ingress
+
+{{- if .Values.secrets.create }}
+
+SECURITY: This release rendered a Secret with default/placeholder values. For any
+non-local environment, override at least secrets.jwtSecret and the Postgres
+password (and secrets.databaseUrl if using an external DB), e.g.:
+
+  helm upgrade --install {{ .Release.Name }} infra/helm/interviewos \
+    --set secrets.jwtSecret=$(openssl rand -hex 32) \
+    --set secrets.postgresPassword=$(openssl rand -hex 24) \
+    --set ingress.host=interviewos.yourdomain.com \
+    --set config.corsOrigins=https://interviewos.yourdomain.com \
+    --set config.apiBaseUrl=https://interviewos.yourdomain.com
+
+Or set secrets.create=false and manage a Secret named "{{ include "interviewos.secretName" . }}" yourself.
+{{- end }}

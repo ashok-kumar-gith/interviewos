@@ -1,0 +1,18 @@
+apiVersion: v2
+name: interviewos
+description: InterviewOS — the learning operating system for technical interview prep (modular-monolith Go API + Next.js frontend, Postgres + Redis).
+type: application
+# Chart version — bump on chart changes.
+version: 0.1.0
+# Application version — the InterviewOS release this chart deploys (default tag).
+appVersion: "1.0.0"
+keywords:
+  - interviewos
+  - interview-prep
+  - go
+  - nextjs
+home: https://github.com/interviewos/interviewos
+sources:
+  - https://github.com/interviewos/interviewos
+maintainers:
+  - name: InterviewOS Engineering
