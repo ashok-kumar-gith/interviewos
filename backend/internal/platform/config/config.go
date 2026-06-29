@@ -7,6 +7,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -28,6 +29,12 @@ type Config struct {
 	LogLevel string
 	// CORSOrigins is the allowlist of permitted browser origins.
 	CORSOrigins []string
+	// AccessTokenTTL is the lifetime of issued JWT access tokens.
+	AccessTokenTTL time.Duration
+	// RefreshTokenTTL is the lifetime of issued refresh tokens.
+	RefreshTokenTTL time.Duration
+	// ResetTokenTTL is the lifetime of password-reset tokens.
+	ResetTokenTTL time.Duration
 }
 
 // Environment helpers.
@@ -52,6 +59,9 @@ func Load() (*Config, error) {
 	v.SetDefault("ENV", "development")
 	v.SetDefault("LOG_LEVEL", "info")
 	v.SetDefault("CORS_ORIGINS", "http://localhost:3000")
+	v.SetDefault("ACCESS_TOKEN_TTL", "15m")
+	v.SetDefault("REFRESH_TOKEN_TTL", "720h")
+	v.SetDefault("RESET_TOKEN_TTL", "1h")
 
 	// Optional .env support for local dev. Missing file is not an error.
 	v.SetConfigName(".env")
@@ -78,10 +88,33 @@ func Load() (*Config, error) {
 		CORSOrigins: splitAndTrim(v.GetString("CORS_ORIGINS")),
 	}
 
+	var err error
+	if cfg.AccessTokenTTL, err = parseDuration(v.GetString("ACCESS_TOKEN_TTL"), "ACCESS_TOKEN_TTL"); err != nil {
+		return nil, err
+	}
+	if cfg.RefreshTokenTTL, err = parseDuration(v.GetString("REFRESH_TOKEN_TTL"), "REFRESH_TOKEN_TTL"); err != nil {
+		return nil, err
+	}
+	if cfg.ResetTokenTTL, err = parseDuration(v.GetString("RESET_TOKEN_TTL"), "RESET_TOKEN_TTL"); err != nil {
+		return nil, err
+	}
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// parseDuration parses a Go duration string, returning a config-scoped error.
+func parseDuration(s, name string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s must be a valid duration (e.g. 15m, 720h): %w", name, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("config: %s must be positive", name)
+	}
+	return d, nil
 }
 
 // validate enforces required fields and value constraints.

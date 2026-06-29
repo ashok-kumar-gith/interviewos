@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
+import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const buttonVariants = cva(
@@ -30,17 +31,26 @@ export const buttonVariants = cva(
 
 export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {}
+    VariantProps<typeof buttonVariants> {
+  /** Shows a spinner and disables interaction while keeping the button width. */
+  loading?: boolean;
+}
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, type = "button", ...props }, ref) => {
+  ({ className, variant, size, type = "button", loading = false, disabled, children, ...props }, ref) => {
     return (
       <button
         ref={ref}
         type={type}
         className={cn(buttonVariants({ variant, size }), className)}
+        disabled={disabled || loading}
+        aria-disabled={disabled || loading || undefined}
+        aria-busy={loading || undefined}
         {...props}
-      />
+      >
+        {loading && <Loader2 className="animate-spin" aria-hidden />}
+        {children}
+      </button>
     );
   },
 );

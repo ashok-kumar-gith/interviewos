@@ -23,6 +23,15 @@ type Options struct {
 	Logger *zap.Logger
 	DB     *gorm.DB
 	Redis  *redis.Client
+	// Registrars are feature modules that mount their routes onto /api/v1.
+	Registrars []RouteRegistrar
+}
+
+// RouteRegistrar attaches a feature module's routes to the versioned /api/v1
+// group. Feature modules (auth, profile, …) implement this and are passed to
+// the server at composition time so wiring stays dependency-injected.
+type RouteRegistrar interface {
+	RegisterRoutes(v1 *gin.RouterGroup)
 }
 
 // New builds and returns a fully-wired *gin.Engine with the middleware chain
@@ -63,7 +72,11 @@ func RegisterRoutes(engine *gin.Engine, opts Options) {
 		})
 	})
 
-	// Versioned API group. Domain module routes mount here later.
+	// Versioned API group. Feature modules mount their routes here.
 	v1 := engine.Group("/api/v1")
-	_ = v1 // reserved for feature-module route registration (M1+).
+	for _, r := range opts.Registrars {
+		if r != nil {
+			r.RegisterRoutes(v1)
+		}
+	}
 }

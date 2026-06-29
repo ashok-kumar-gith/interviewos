@@ -2,6 +2,12 @@
 
 import * as React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { setAccessTokenProvider } from "@/lib/api/client";
+import { getAccessToken } from "@/lib/store/auth";
+
+// Wire the API client to read the in-memory access token from the auth store.
+// Registered at module load so it is set before any request fires.
+setAccessTokenProvider(getAccessToken);
 
 function makeQueryClient(): QueryClient {
   return new QueryClient({

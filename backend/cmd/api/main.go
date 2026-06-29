@@ -18,6 +18,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/interviewos/backend/internal/auth"
 	"github.com/interviewos/backend/internal/platform/config"
 	"github.com/interviewos/backend/internal/platform/database"
 	"github.com/interviewos/backend/internal/platform/logger"
@@ -72,12 +73,24 @@ func run() error {
 		log.Info("connected to redis")
 	}
 
-	// 4. Build the router.
+	// 4. Compose feature modules (clean DI) and build the router.
+	var registrars []server.RouteRegistrar
+	if db != nil {
+		authHandler, aerr := buildAuthModule(cfg, log, db)
+		if aerr != nil {
+			return aerr
+		}
+		registrars = append(registrars, authHandler)
+	} else {
+		log.Warn("auth module not mounted: database unavailable")
+	}
+
 	engine := server.New(server.Options{
-		Config: cfg,
-		Logger: log,
-		DB:     db,
-		Redis:  rdb,
+		Config:     cfg,
+		Logger:     log,
+		DB:         db,
+		Redis:      rdb,
+		Registrars: registrars,
 	})
 
 	srv := &http.Server{
@@ -127,4 +140,40 @@ func run() error {
 
 	log.Info("shutdown complete")
 	return nil
+}
+
+// buildAuthModule wires the auth repository, token manager, mailer, OAuth
+// registry, service, and HTTP handler from configuration and shared deps.
+func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB) (*auth.Handler, error) {
+	tokens, err := auth.NewTokenManager(auth.TokenManagerConfig{
+		Secret:     cfg.JWTSecret,
+		AccessTTL:  cfg.AccessTokenTTL,
+		RefreshTTL: cfg.RefreshTokenTTL,
+		ResetTTL:   cfg.ResetTokenTTL,
+		Issuer:     "interviewos",
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	repo := auth.NewRepository(db)
+	mailer := auth.NewLogMailer(log)
+	// No live OAuth credentials locally: register unconfigured providers so the
+	// callback route exists and returns a clear 501.
+	oauthReg := auth.NewOAuthRegistry(
+		auth.NewUnconfiguredProvider(auth.ProviderGoogle),
+		auth.NewUnconfiguredProvider(auth.ProviderGitHub),
+	)
+	svc := auth.NewService(auth.ServiceConfig{
+		Repo:   repo,
+		Tokens: tokens,
+		Mailer: mailer,
+		OAuth:  oauthReg,
+		Logger: log,
+	})
+	return auth.NewHandler(auth.HandlerConfig{
+		Service:       svc,
+		Tokens:        tokens,
+		SecureCookies: cfg.IsProduction(),
+	}), nil
 }
