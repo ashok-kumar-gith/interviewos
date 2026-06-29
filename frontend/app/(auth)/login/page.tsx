@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { useMutation } from "@tanstack/react-query";
 import { z } from "zod";
@@ -24,9 +24,23 @@ const loginSchema = z.object({
 type LoginValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
+  // useSearchParams must be under a Suspense boundary for static prerender.
+  return (
+    <React.Suspense fallback={<LoginCard />}>
+      <LoginForm />
+    </React.Suspense>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const setSession = useAuthStore((s) => s.setSession);
   const [formError, setFormError] = React.useState<string | null>(null);
+
+  // Return the user to where the auth guard bounced them from, if safe.
+  const next = searchParams.get("next");
+  const redirectTo = next && next.startsWith("/") && !next.startsWith("//") ? next : "/dashboard";
 
   const {
     register,
@@ -40,7 +54,7 @@ export default function LoginPage() {
     mutationFn: (values: LoginValues): Promise<AuthTokensResponse> => login(values),
     onSuccess: (data) => {
       setSession({ accessToken: data.access_token, user: data.user });
-      router.push("/dashboard");
+      router.replace(redirectTo);
     },
     onError: (error) => {
       setFormError(authErrorMessage(error, "Couldn't sign you in. Try again."));
@@ -112,6 +126,26 @@ export default function LoginPage() {
             Create an account
           </Link>
         </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Static shell rendered during the Suspense fallback / prerender (no hooks). */
+function LoginCard() {
+  return (
+    <Card className="animate-scale-in">
+      <CardHeader>
+        <CardTitle className="text-h2">Welcome back</CardTitle>
+        <CardDescription>Sign in to pick up where you left off.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <OAuthButtons />
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="h-px flex-1 bg-border" />
+          or continue with email
+          <span className="h-px flex-1 bg-border" />
+        </div>
       </CardContent>
     </Card>
   );
