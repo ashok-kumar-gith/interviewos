@@ -1,10 +1,10 @@
 "use client";
 
 import { motion, useReducedMotion } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight, type LucideIcon } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Gauge } from "lucide-react";
 import { ProgressRing } from "@/components/ui/progress-ring";
 import { Card } from "@/components/ui/card";
-import type { PillarKey } from "@/lib/nav";
+import { PILLAR_NAV, type PillarKey } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 interface ReadinessCardProps {
@@ -12,7 +12,6 @@ interface ReadinessCardProps {
   value: number; // 0–100
   deltaPct?: number; // vs last week, signed
   takeaway?: string; // one-line insight
-  icon: LucideIcon;
   pillar?: PillarKey; // omit for Overall (uses primary)
   variant?: "overall" | "pillar";
   loading?: boolean;
@@ -23,12 +22,14 @@ export function ReadinessCard({
   value,
   deltaPct,
   takeaway,
-  icon: Icon,
   pillar,
   variant = "pillar",
   loading = false,
 }: ReadinessCardProps) {
   const reduce = useReducedMotion();
+  // Resolve the icon on the client so the parent Server Component never has to
+  // pass a (non-serializable) component function across the RSC boundary.
+  const Icon = (pillar && PILLAR_NAV.find((n) => n.pillar === pillar)?.icon) || Gauge;
   const ringColor = pillar ? `hsl(var(--pillar-${pillar}))` : "hsl(var(--primary))";
   const isUp = (deltaPct ?? 0) >= 0;
 

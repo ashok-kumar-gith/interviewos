@@ -30,7 +30,9 @@ func New(env, level string) (*zap.Logger, error) {
 	cfg.OutputPaths = []string{"stdout"}
 	cfg.ErrorOutputPaths = []string{"stderr"}
 
-	log, err := cfg.Build()
+	// Only attach stack traces at Error level and above; the development config
+	// defaults to WarnLevel, which makes ordinary 4xx request logs noisy.
+	log, err := cfg.Build(zap.AddStacktrace(zapcore.ErrorLevel))
 	if err != nil {
 		return nil, fmt.Errorf("logger: build: %w", err)
 	}

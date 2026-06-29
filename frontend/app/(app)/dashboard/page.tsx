@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Gauge } from "lucide-react";
 import { ReadinessCard } from "@/components/dashboard/readiness-card";
 import { PILLAR_NAV, type PillarKey } from "@/lib/nav";
 
@@ -29,9 +28,11 @@ const PILLAR_DATA: PillarReadiness[] = [
   { pillar: "resume", value: 80, deltaPct: 0, takeaway: "ATS-ready." },
 ];
 
-const PILLAR_ICON = Object.fromEntries(
-  PILLAR_NAV.map((n) => [n.pillar, { icon: n.icon, label: n.label }]),
-) as Record<PillarKey, { icon: (typeof PILLAR_NAV)[number]["icon"]; label: string }>;
+// Serializable label lookup (no component functions) — safe to use in this
+// Server Component and pass down as plain strings.
+const PILLAR_LABEL = Object.fromEntries(
+  PILLAR_NAV.map((n) => [n.pillar, n.label]),
+) as Record<PillarKey, string>;
 
 export default function DashboardPage() {
   return (
@@ -52,7 +53,6 @@ export default function DashboardPage() {
           value={68}
           deltaPct={4}
           takeaway="On track — System Design is your next focus."
-          icon={Gauge}
           variant="overall"
         />
       </section>
@@ -62,21 +62,17 @@ export default function DashboardPage() {
           Readiness by pillar
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {PILLAR_DATA.map((p) => {
-            const meta = PILLAR_ICON[p.pillar];
-            return (
-              <ReadinessCard
-                key={p.pillar}
-                label={meta.label}
-                value={p.value}
-                deltaPct={p.deltaPct}
-                takeaway={p.takeaway}
-                icon={meta.icon}
-                pillar={p.pillar}
-                variant="pillar"
-              />
-            );
-          })}
+          {PILLAR_DATA.map((p) => (
+            <ReadinessCard
+              key={p.pillar}
+              label={PILLAR_LABEL[p.pillar]}
+              value={p.value}
+              deltaPct={p.deltaPct}
+              takeaway={p.takeaway}
+              pillar={p.pillar}
+              variant="pillar"
+            />
+          ))}
         </div>
       </section>
     </div>
