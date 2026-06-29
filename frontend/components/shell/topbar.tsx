@@ -2,6 +2,7 @@
 
 import { Command, Flame, Moon, PanelLeft, Search, Sun, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/shell/notification-bell";
 import { useUiStore } from "@/lib/store/ui";
 
 export function Topbar() {
@@ -46,6 +47,8 @@ export function Topbar() {
         <Flame className="size-3.5 text-warning" aria-hidden />
         12d
       </span>
+
+      <NotificationBell />
 
       <Button
         variant="ghost"

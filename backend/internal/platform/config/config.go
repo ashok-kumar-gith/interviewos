@@ -35,6 +35,15 @@ type Config struct {
 	RefreshTokenTTL time.Duration
 	// ResetTokenTTL is the lifetime of password-reset tokens.
 	ResetTokenTTL time.Duration
+	// AnthropicAPIKey is the Claude API key. Optional: when empty the AI module
+	// runs in deterministic-fallback mode (no external calls are made).
+	AnthropicAPIKey string
+	// AIModel is the Claude model id used for AI features (default
+	// claude-sonnet-4-6).
+	AIModel string
+	// AIEnabled gates the AI augmentation. When false (or when AnthropicAPIKey is
+	// empty) every /ai/* feature serves the deterministic fallback.
+	AIEnabled bool
 }
 
 // Environment helpers.
@@ -62,6 +71,9 @@ func Load() (*Config, error) {
 	v.SetDefault("ACCESS_TOKEN_TTL", "15m")
 	v.SetDefault("REFRESH_TOKEN_TTL", "720h")
 	v.SetDefault("RESET_TOKEN_TTL", "1h")
+	v.SetDefault("ANTHROPIC_API_KEY", "")
+	v.SetDefault("AI_MODEL", "claude-sonnet-4-6")
+	v.SetDefault("AI_ENABLED", true)
 
 	// Optional .env support for local dev. Missing file is not an error.
 	v.SetConfigName(".env")
@@ -86,6 +98,13 @@ func Load() (*Config, error) {
 		Env:         strings.ToLower(v.GetString("ENV")),
 		LogLevel:    strings.ToLower(v.GetString("LOG_LEVEL")),
 		CORSOrigins: splitAndTrim(v.GetString("CORS_ORIGINS")),
+
+		AnthropicAPIKey: strings.TrimSpace(v.GetString("ANTHROPIC_API_KEY")),
+		AIModel:         strings.TrimSpace(v.GetString("AI_MODEL")),
+		AIEnabled:       v.GetBool("AI_ENABLED"),
+	}
+	if cfg.AIModel == "" {
+		cfg.AIModel = "claude-sonnet-4-6"
 	}
 
 	var err error

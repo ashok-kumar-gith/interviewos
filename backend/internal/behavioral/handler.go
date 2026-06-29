@@ -44,8 +44,9 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 		g.DELETE("/:storyId", h.Delete)
 		g.POST("/:storyId/improve", h.Improve)
 	}
-	// AI alias: POST /api/v1/ai/story-improve (by story id or inline STAR).
-	v1.POST("/ai/story-improve", auth.RequireAuth(h.tokens), h.AIStoryImprove)
+	// Note: POST /api/v1/ai/story-improve is owned by the internal/ai module
+	// (M4), which adds graceful fallback + ai_invocations logging. This module
+	// owns only the resource-scoped POST /behavioral-stories/{id}/improve.
 }
 
 // ---- DTOs ----
@@ -109,15 +110,6 @@ type improveResponse struct {
 	Suggestions   []string      `json:"suggestions"`
 	StrengthScore float64       `json:"strength_score"`
 	UsedFallback  bool          `json:"used_fallback"`
-}
-
-type aiStoryImproveRequest struct {
-	StoryID   string `json:"story_id"`
-	Situation string `json:"situation"`
-	Task      string `json:"task"`
-	Action    string `json:"action"`
-	Result    string `json:"result"`
-	Metrics   string `json:"metrics"`
 }
 
 // ---- handlers ----
@@ -269,47 +261,6 @@ func (h *Handler) Improve(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, toImproveResponse(story.ID.String(), res))
-}
-
-// AIStoryImprove handles POST /ai/story-improve. With a story_id it improves the
-// stored story (ownership enforced); otherwise it improves inline STAR text.
-func (h *Handler) AIStoryImprove(c *gin.Context) {
-	uid, ok := auth.UserIDFromContext(c)
-	if !ok {
-		h.unauth(c)
-		return
-	}
-	var req aiStoryImproveRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "invalid or malformed JSON body", nil)
-		return
-	}
-	if strings.TrimSpace(req.StoryID) != "" {
-		id, err := uuid.Parse(req.StoryID)
-		if err != nil {
-			server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "story_id must be a valid UUID", nil)
-			return
-		}
-		story, res, ierr := h.svc.Improve(c.Request.Context(), uid, id)
-		if ierr != nil {
-			h.writeServiceError(c, ierr)
-			return
-		}
-		c.JSON(http.StatusOK, toImproveResponse(story.ID.String(), res))
-		return
-	}
-	res, err := h.svc.ImproveInline(c.Request.Context(), ImproveInput{
-		Situation: req.Situation,
-		Task:      req.Task,
-		Action:    req.Action,
-		Result:    req.Result,
-		Metrics:   req.Metrics,
-	})
-	if err != nil {
-		h.writeServiceError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, toImproveResponse("", res))
 }
 
 // ---- helpers ----

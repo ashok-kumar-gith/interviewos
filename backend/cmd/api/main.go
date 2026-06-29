@@ -18,6 +18,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/interviewos/backend/internal/ai"
 	"github.com/interviewos/backend/internal/analytics"
 	"github.com/interviewos/backend/internal/auth"
 	"github.com/interviewos/backend/internal/behavioral"
@@ -183,6 +184,42 @@ func run() error {
 		registrars = append(registrars, company.NewHandler(company.HandlerConfig{
 			Service: company.NewService(company.ServiceConfig{Repo: company.NewRepository(db)}),
 			Tokens:  tokens,
+		}))
+
+		// AI Assistants (M4). The orchestrator calls Claude when an API key is
+		// present and AI is enabled; otherwise — or on any error/timeout — it
+		// serves the deterministic fallback (reusing the behavioral improver,
+		// resume scorer, and mock weakness detector). Every call records an
+		// ai_invocations row. AI is an augmentation, never a P0 dependency (§9).
+		var aiClient ai.Client
+		if cfg.AIEnabled && cfg.AnthropicAPIKey != "" {
+			ac, aerr := ai.NewAnthropicClient(ai.AnthropicConfig{APIKey: cfg.AnthropicAPIKey, Model: cfg.AIModel})
+			if aerr != nil {
+				log.Warn("ai: anthropic client unavailable; using deterministic fallback", zap.Error(aerr))
+			} else {
+				aiClient = ac
+				log.Info("ai: anthropic client enabled", zap.String("model", cfg.AIModel))
+			}
+		} else {
+			log.Info("ai: running in deterministic-fallback mode (no api key or disabled)")
+		}
+		aiReaders := ai.NewReaders(db)
+		registrars = append(registrars, ai.NewHandler(ai.HandlerConfig{
+			Service: ai.NewService(ai.ServiceConfig{
+				Client:   aiClient,
+				Cache:    ai.NewRedisCache(rdb),
+				Repo:     ai.NewRepository(db),
+				Enabled:  cfg.AIEnabled,
+				Model:    cfg.AIModel,
+				Profiles: aiReaders,
+				Plans:    aiReaders,
+				Stories:  aiReaders,
+				Resumes:  aiReaders,
+				Mocks:    aiReaders,
+				Topics:   aiReaders,
+				Designs:  aiReaders,
+			}),
+			Tokens: tokens,
 		}))
 	} else {
 		log.Warn("feature modules not mounted: database unavailable")
