@@ -1,0 +1,94 @@
+# InterviewOS — local development stack
+# Usage (from repo root): `make dev`  (wraps `docker compose -f infra/docker-compose.yml up`)
+# Build contexts are relative to this file (infra/), hence ../backend and ../frontend.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: interviewos-postgres
+    environment:
+      POSTGRES_USER: interviewos
+      POSTGRES_PASSWORD: interviewos
+      POSTGRES_DB: interviewos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U interviewos -d interviewos"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: interviewos-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Dev-only mail catcher (SMTP 1025, web UI 8025). Does NOT change the
+  # in-app-only GA notification default (ADR D18) — it only catches dev email.
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: interviewos-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: interviewos-backend
+    environment:
+      ENV: development
+      PORT: "8080"
+      DATABASE_URL: postgres://interviewos:interviewos@postgres:5432/interviewos?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: dev-only-change-me
+      LOG_LEVEL: debug
+      CORS_ORIGINS: http://localhost:3000
+      SMTP_HOST: mailhog
+      SMTP_PORT: "1025"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: interviewos-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: interviewos-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  pgdata:
+  redisdata:

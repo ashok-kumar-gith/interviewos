@@ -1,0 +1,2114 @@
+openapi: 3.1.0
+info:
+  title: InterviewOS API
+  version: 1.0.0
+  summary: "REST API for InterviewOS — the interview-prep learning operating system (GA track: Backend SDE3)."
+  description: |
+    REST API under `/api/v1`. JWT bearer access tokens (short-lived) + rotating
+    refresh tokens. All field names and enum values are consistent with
+    `04-DATABASE-SCHEMA.md` and `05-API-CONTRACTS.md`.
+  contact:
+    name: InterviewOS Engineering
+    email: eng@interviewos.app
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.interviewos.app/api/v1
+    description: Production
+  - url: https://staging-api.interviewos.app/api/v1
+    description: Staging
+  - url: http://localhost:8080/api/v1
+    description: Local
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+    description: Registration, login, OAuth, token refresh, password reset.
+  - name: Profile
+    description: Intake wizard & user profile.
+  - name: Curriculum
+    description: Roadmap generation, weeks, days, today, task lifecycle.
+  - name: Content
+    description: Tracks, pillars, topics, subtopics, resources browsing.
+  - name: DSA
+    description: Problems and patterns.
+  - name: SystemDesign
+    description: Design (HLD) problems.
+  - name: BackendEngineering
+    description: Backend-engineering depth topics.
+  - name: LLD
+    description: Low-level design problems.
+  - name: Behavioral
+    description: STAR behavioral stories.
+  - name: Resume
+    description: Resume profile, projects, scoring.
+  - name: Mock
+    description: Mock interviews and findings.
+  - name: Revision
+    description: Spaced-repetition revision engine.
+  - name: Company
+    description: Company mode (list, set target).
+  - name: Analytics
+    description: Readiness, streaks, weak/strong topics, snapshots.
+  - name: Notifications
+    description: In-app notifications.
+  - name: AI
+    description: AI assistants (planner, coach, reviewers, weakness detector).
+
+paths:
+  # ---------------- AUTH ----------------
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register with email/password
+      security: []
+      operationId: authRegister
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokensResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email/password
+      security: []
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokensResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/oauth/{provider}/callback:
+    get:
+      tags: [Auth]
+      summary: OAuth callback (google | github)
+      security: []
+      operationId: authOAuthCallback
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [google, github] }
+        - name: code
+          in: query
+          required: true
+          schema: { type: string }
+        - name: state
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokensResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate refresh token, issue new access token
+      security:
+        - refreshAuth: []
+      operationId: authRefresh
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokensResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke current refresh-token family
+      operationId: authLogout
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset email
+      security: []
+      operationId: authForgotPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+      responses:
+        '202': { description: "Accepted (always, to avoid account enumeration)" }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password using a token
+      security: []
+      operationId: authResetPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '204': { description: No Content }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated user
+      operationId: authMe
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ---------------- PROFILE / INTAKE ----------------
+  /profile:
+    get:
+      tags: [Profile]
+      summary: Get my intake profile
+      operationId: getProfile
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Profile]
+      summary: Create or update intake profile
+      operationId: upsertProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserProfileUpsert' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserProfile' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------- CURRICULUM ----------------
+  /roadmaps/generate:
+    post:
+      tags: [Curriculum]
+      summary: Generate a personalized roadmap from intake
+      operationId: generateRoadmap
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GenerateRoadmapRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Roadmap' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /roadmaps/active:
+    get:
+      tags: [Curriculum]
+      summary: Get the active roadmap (weeks summary)
+      operationId: getActiveRoadmap
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Roadmap' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /roadmaps/{roadmapId}/weeks/{weekNumber}:
+    get:
+      tags: [Curriculum]
+      summary: Get a roadmap week with its days
+      operationId: getRoadmapWeek
+      parameters:
+        - { name: roadmapId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: weekNumber, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RoadmapWeek' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /plan-days/{date}:
+    get:
+      tags: [Curriculum]
+      summary: Get the plan day for a date
+      operationId: getPlanDay
+      parameters:
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanDay' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /today:
+    get:
+      tags: [Curriculum]
+      summary: Get today's auto-generated plan
+      operationId: getToday
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanDay' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tasks/{taskId}/complete:
+    post:
+      tags: [Curriculum]
+      summary: Complete a task (confidence + time + notes)
+      operationId: completeTask
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompleteTaskRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CompleteTaskResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /tasks/{taskId}/skip:
+    post:
+      tags: [Curriculum]
+      summary: Skip a task
+      operationId: skipTask
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SkipTaskRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanTask' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tasks/{taskId}/reschedule:
+    post:
+      tags: [Curriculum]
+      summary: Reschedule a task to another date
+      operationId: rescheduleTask
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RescheduleTaskRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanTask' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------- CONTENT BROWSING ----------------
+  /tracks:
+    get:
+      tags: [Content]
+      summary: List tracks
+      operationId: listTracks
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Track' } }
+
+  /pillars:
+    get:
+      tags: [Content]
+      summary: List pillars (filter by track)
+      operationId: listPillars
+      parameters:
+        - { name: track_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Pillar' } }
+
+  /topics:
+    get:
+      tags: [Content]
+      summary: List/browse topics with pagination, filter, sort, search
+      operationId: listTopics
+      parameters:
+        - { name: track_id, in: query, schema: { type: string, format: uuid } }
+        - { name: pillar_id, in: query, schema: { type: string, format: uuid } }
+        - { name: pillar_type, in: query, schema: { $ref: '#/components/schemas/PillarType' } }
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - { name: priority, in: query, schema: { $ref: '#/components/schemas/Priority' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Filter'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Topic' } }
+
+  /topics/{topicId}:
+    get:
+      tags: [Content]
+      summary: Get a topic with subtopics and resources
+      operationId: getTopic
+      parameters:
+        - { name: topicId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopicDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /resources:
+    get:
+      tags: [Content]
+      summary: List/browse resources
+      operationId: listResources
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/ResourceType' } }
+        - { name: topic_id, in: query, schema: { type: string, format: uuid } }
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Resource' } }
+
+  # ---------------- DSA ----------------
+  /problems:
+    get:
+      tags: [DSA]
+      summary: List DSA problems (filter by company, difficulty, pattern)
+      operationId: listProblems
+      parameters:
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - { name: pattern_id, in: query, schema: { type: string, format: uuid } }
+        - { name: topic_id, in: query, schema: { type: string, format: uuid } }
+        - { name: company_id, in: query, schema: { type: string, format: uuid } }
+        - { name: source, in: query, schema: { $ref: '#/components/schemas/ProblemSourceName' } }
+        - { name: solved, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Problem' } }
+
+  /problems/{problemId}:
+    get:
+      tags: [DSA]
+      summary: Get a problem with patterns, sources, company frequency, progress
+      operationId: getProblem
+      parameters:
+        - { name: problemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /patterns:
+    get:
+      tags: [DSA]
+      summary: List DSA patterns
+      operationId: listPatterns
+      parameters:
+        - { name: track_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Pattern' } }
+
+  # ---------------- SYSTEM DESIGN ----------------
+  /design-problems:
+    get:
+      tags: [SystemDesign]
+      summary: List HLD design problems (ordered catalog)
+      operationId: listDesignProblems
+      parameters:
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/DesignProblem' } }
+
+  /design-problems/{designProblemId}:
+    get:
+      tags: [SystemDesign]
+      summary: Get a design problem with all sections
+      operationId: getDesignProblem
+      parameters:
+        - { name: designProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignProblemDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------- BACKEND ENGINEERING ----------------
+  /backend-engineering/topics:
+    get:
+      tags: [BackendEngineering]
+      summary: List backend-engineering depth topics
+      operationId: listBackendTopics
+      parameters:
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Topic' } }
+
+  # ---------------- LLD ----------------
+  /lld-problems:
+    get:
+      tags: [LLD]
+      summary: List LLD problems
+      operationId: listLLDProblems
+      parameters:
+        - { name: difficulty, in: query, schema: { $ref: '#/components/schemas/Difficulty' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/LLDProblem' } }
+
+  /lld-problems/{lldProblemId}:
+    get:
+      tags: [LLD]
+      summary: Get an LLD problem with all sections
+      operationId: getLLDProblem
+      parameters:
+        - { name: lldProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LLDProblemDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---------------- BEHAVIORAL ----------------
+  /behavioral-stories:
+    get:
+      tags: [Behavioral]
+      summary: List my behavioral stories
+      operationId: listStories
+      parameters:
+        - { name: theme, in: query, schema: { $ref: '#/components/schemas/StoryTheme' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/BehavioralStory' } }
+    post:
+      tags: [Behavioral]
+      summary: Create a behavioral story
+      operationId: createStory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BehavioralStoryUpsert' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BehavioralStory' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /behavioral-stories/{storyId}:
+    get:
+      tags: [Behavioral]
+      summary: Get a behavioral story
+      operationId: getStory
+      parameters: [ { name: storyId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BehavioralStory' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Behavioral]
+      summary: Update a behavioral story
+      operationId: updateStory
+      parameters: [ { name: storyId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/BehavioralStoryUpsert' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BehavioralStory' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Behavioral]
+      summary: Delete a behavioral story
+      operationId: deleteStory
+      parameters: [ { name: storyId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /behavioral-stories/{storyId}/improve:
+    post:
+      tags: [Behavioral, AI]
+      summary: AI-improve a story (stronger framing, metrics, concision)
+      operationId: improveStory
+      parameters: [ { name: storyId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/StoryImproveResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  # ---------------- RESUME ----------------
+  /resume/profile:
+    get:
+      tags: [Resume]
+      summary: Get my resume profile
+      operationId: getResumeProfile
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProfile' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Resume]
+      summary: Create or update my resume profile
+      operationId: upsertResumeProfile
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProfileUpsert' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProfile' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /resume/projects:
+    get:
+      tags: [Resume]
+      summary: List my resume projects
+      operationId: listResumeProjects
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ResumeProject' } }
+    post:
+      tags: [Resume]
+      summary: Add a resume project
+      operationId: createResumeProject
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProjectUpsert' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProject' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /resume/projects/{projectId}:
+    put:
+      tags: [Resume]
+      summary: Update a resume project
+      operationId: updateResumeProject
+      parameters: [ { name: projectId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProjectUpsert' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProject' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Resume]
+      summary: Delete a resume project
+      operationId: deleteResumeProject
+      parameters: [ { name: projectId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /resume/score:
+    post:
+      tags: [Resume, AI]
+      summary: Score resume (ATS + AI review)
+      operationId: scoreResume
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeScoreResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  # ---------------- MOCK ----------------
+  /mock-interviews:
+    get:
+      tags: [Mock]
+      summary: List my mock interviews
+      operationId: listMocks
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/MockType' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Sort'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/MockInterview' } }
+    post:
+      tags: [Mock]
+      summary: Create a mock interview
+      operationId: createMock
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MockInterviewUpsert' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MockInterview' } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /mock-interviews/{mockId}:
+    get:
+      tags: [Mock]
+      summary: Get a mock interview with findings
+      operationId: getMock
+      parameters: [ { name: mockId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MockInterviewDetail' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Mock]
+      summary: Update a mock interview
+      operationId: updateMock
+      parameters: [ { name: mockId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MockInterviewUpsert' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MockInterview' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Mock]
+      summary: Delete a mock interview
+      operationId: deleteMock
+      parameters: [ { name: mockId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /mock-interviews/{mockId}/findings:
+    post:
+      tags: [Mock]
+      summary: Add a finding to a mock interview
+      operationId: addMockFinding
+      parameters: [ { name: mockId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MockFindingUpsert' } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/MockFinding' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------- REVISION ----------------
+  /revision/due:
+    get:
+      tags: [Revision]
+      summary: List revision items due (today/overdue)
+      operationId: listDueRevisions
+      parameters:
+        - { name: on_date, in: query, schema: { type: string, format: date } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/RevisionItem' } }
+
+  /revision/{revisionItemId}/recall:
+    post:
+      tags: [Revision]
+      summary: Submit recall result; advance or reset interval
+      operationId: submitRecall
+      parameters: [ { name: revisionItemId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RecallRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RevisionItem' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------- COMPANY ----------------
+  /companies:
+    get:
+      tags: [Company]
+      summary: List companies
+      operationId: listCompanies
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Query'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Company' } }
+
+  /companies/{companyId}:
+    get:
+      tags: [Company]
+      summary: Get a company with weights
+      operationId: getCompany
+      parameters: [ { name: companyId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CompanyDetail' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /company/target:
+    get:
+      tags: [Company]
+      summary: Get my current target company (singleton "my target" sub-resource)
+      operationId: getTargetCompany
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Company]
+      summary: Set my target company (re-weights roadmap)
+      operationId: setTargetCompany
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SetTargetCompanyRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------- ANALYTICS ----------------
+  /dashboard:
+    get:
+      tags: [Analytics]
+      summary: Get dashboard aggregate
+      operationId: getDashboard
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DashboardResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /analytics/readiness:
+    get:
+      tags: [Analytics]
+      summary: Current overall & per-pillar readiness + estimated ready date
+      operationId: getReadiness
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReadinessSnapshot' } } } }
+
+  /analytics/snapshots:
+    get:
+      tags: [Analytics]
+      summary: Readiness snapshots over time
+      operationId: getSnapshots
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/ReadinessSnapshot' } }
+
+  /analytics/streak:
+    get:
+      tags: [Analytics]
+      summary: Study streak + per-day activity
+      operationId: getStreak
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/StreakResponse' } } } }
+
+  /analytics/topics:
+    get:
+      tags: [Analytics]
+      summary: Weak/strong topics
+      operationId: getTopicAnalytics
+      parameters:
+        - { name: bucket, in: query, schema: { type: string, enum: [weak, strong, all], default: all } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TopicAnalyticsResponse' } } } }
+
+  /analytics/time-spent:
+    get:
+      tags: [Analytics]
+      summary: Time-spent aggregation (heatmap)
+      operationId: getTimeSpent
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: group_by, in: query, schema: { type: string, enum: [day, pillar], default: day } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TimeSpentResponse' } } } }
+
+  # ---------------- NOTIFICATIONS ----------------
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      operationId: listNotifications
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/NotificationStatus' } }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedEnvelope'
+                  - type: object
+                    properties:
+                      data: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notifications]
+      summary: Mark a notification read
+      operationId: markNotificationRead
+      parameters: [ { name: notificationId, in: path, required: true, schema: { type: string, format: uuid } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Notification' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications read
+      operationId: markAllNotificationsRead
+      responses:
+        '204': { description: No Content }
+
+  # ---------------- AI ----------------
+  /ai/planner:
+    post:
+      tags: [AI]
+      summary: AI study planner (refines roadmap suggestions)
+      operationId: aiPlanner
+      parameters: [ $ref: '#/components/parameters/IdempotencyKey' ]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIPlannerRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /ai/coach:
+    post:
+      tags: [AI]
+      summary: AI interview coach (Q&A on prep)
+      operationId: aiCoach
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AICoachRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /ai/resume-review:
+    post:
+      tags: [AI]
+      summary: AI resume review
+      operationId: aiResumeReview
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /ai/story-improve:
+    post:
+      tags: [AI]
+      summary: AI story improver (by story id or inline STAR)
+      operationId: aiStoryImprove
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIStoryImproveRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/StoryImproveResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /ai/weakness-detect:
+    post:
+      tags: [AI]
+      summary: AI weakness detector (from progress + mocks)
+      operationId: aiWeaknessDetect
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WeaknessDetectResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /ai/daily-plan:
+    post:
+      tags: [AI]
+      summary: AI daily-plan refinement for a date
+      operationId: aiDailyPlan
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/AIDailyPlanRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /ai/sd-review:
+    post:
+      tags: [AI]
+      summary: AI system-design review of a user's design answer
+      operationId: aiSdReview
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AISdReviewRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AIResponse' } } } }
+        '503': { $ref: '#/components/responses/AIUnavailable' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Short-lived access token in `Authorization: Bearer <token>`."
+    refreshAuth:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+      description: Rotating refresh token (HttpOnly cookie; may also be sent in body).
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Sort:
+      name: sort
+      in: query
+      description: "Comma-separated fields, `-` prefix for desc. e.g. `-created_at,title`."
+      schema: { type: string }
+    Filter:
+      name: filter
+      in: query
+      description: "RHS-colon filter expression, e.g. `difficulty:hard,priority:high`."
+      schema: { type: string }
+    Query:
+      name: q
+      in: query
+      description: Full-text search query.
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Client-generated key to make a write idempotent.
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Malformed request
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Unauthorized:
+      description: Missing/invalid credentials
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Forbidden:
+      description: Authenticated but not permitted
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    NotFound:
+      description: Resource not found
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    Conflict:
+      description: Conflict (e.g. already exists / active roadmap exists)
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    ValidationError:
+      description: Validation failed
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    TooManyRequests:
+      description: Rate limit exceeded
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds until retry }
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+    AIUnavailable:
+      description: AI provider unavailable (deterministic fallback may be returned)
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+
+  schemas:
+    # ---- Enums ----
+    PillarType: { type: string, enum: [dsa, system_design, lld, backend_engineering, behavioral, resume] }
+    ResourceType: { type: string, enum: [book, video, article, course, github, practice, documentation, blog, cheatsheet] }
+    Difficulty: { type: string, enum: [easy, medium, hard] }
+    Priority: { type: string, enum: [low, medium, high, critical] }
+    TaskKind: { type: string, enum: [study, solve, read, watch, revise, mock] }
+    TaskStatus: { type: string, enum: [pending, in_progress, completed, skipped, rescheduled] }
+    PlanItemType: { type: string, enum: [topic, subtopic, problem, resource, design_problem, lld_problem, behavioral_story, revision_item] }
+    ProgressStatus: { type: string, enum: [not_started, in_progress, completed, needs_review] }
+    ConfidenceLevel: { type: integer, minimum: 1, maximum: 5 }
+    RecallResult: { type: string, enum: [correct, incorrect] }
+    ProblemSourceName: { type: string, enum: [blind75, neetcode150, grind75, tech_interview_handbook, leetcode_top, striver_sde, custom] }
+    ProblemPlatform: { type: string, enum: [leetcode, hackerrank, codeforces, interviewbit, gfg, custom] }
+    StoryTheme: { type: string, enum: [leadership, ownership, conflict, failure, mentorship, stakeholder_management, project_rescue, production_incident, ambiguity, impact] }
+    MockType: { type: string, enum: [coding, system_design, lld, behavioral, backend_engineering] }
+    MockOutcome: { type: string, enum: [strong_hire, hire, lean_hire, no_hire, strong_no_hire, not_rated] }
+    FindingSeverity: { type: string, enum: [info, minor, major, blocker] }
+    NotificationType: { type: string, enum: [today_plan, revision_due, weekly_review, missed_goal, streak_reminder, readiness_milestone, mock_scheduled, system] }
+    NotificationChannel: { type: string, enum: [in_app, email, push] }
+    NotificationStatus: { type: string, enum: [unread, read, dismissed] }
+    AttachmentKind: { type: string, enum: [link, file, image] }
+    OwnerType: { type: string, enum: [plan_task, topic, subtopic, problem, design_problem, lld_problem, behavioral_story, mock_interview] }
+    AIFeature: { type: string, enum: [planner, coach, resume_review, story_improve, weakness_detect, daily_plan, sd_review] }
+    AuthProvider: { type: string, enum: [google, github, email] }
+
+    # ---- Envelopes ----
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string, description: Stable machine code, e.g. VALIDATION_ERROR }
+            message: { type: string }
+            request_id: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  message: { type: string }
+    PaginationMeta:
+      type: object
+      required: [page, page_size, total, total_pages]
+      properties:
+        page: { type: integer }
+        page_size: { type: integer }
+        total: { type: integer }
+        total_pages: { type: integer }
+    PaginatedEnvelope:
+      type: object
+      required: [data, meta]
+      properties:
+        data: { type: array, items: {} }
+        meta: { $ref: '#/components/schemas/PaginationMeta' }
+
+    # ---- Auth ----
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8, format: password }
+        full_name: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    RefreshRequest:
+      type: object
+      properties:
+        refresh_token: { type: string }
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    ResetPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token: { type: string }
+        password: { type: string, minLength: 8, format: password }
+    AuthTokensResponse:
+      type: object
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string, description: Also set as HttpOnly cookie }
+        token_type: { type: string, const: Bearer }
+        expires_in: { type: integer, description: Access token TTL seconds }
+        user: { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      required: [id, email, role, status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        email_verified: { type: boolean, description: "Derived from the persisted `email_verified_at` timestamp (true when set)." }
+        full_name: { type: [string, 'null'] }
+        avatar_url: { type: [string, 'null'] }
+        role: { type: string, enum: [user, admin] }
+        status: { type: string, enum: [active, suspended, deleted] }
+        last_login_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    # ---- Profile ----
+    UserProfile:
+      type: object
+      required: [id, user_id, track_id, target_role, hours_per_week, start_date, target_weeks]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        years_experience: { type: number }
+        target_company_id: { type: [string, 'null'], format: uuid }
+        target_role: { type: string }
+        target_level: { type: [string, 'null'] }
+        hours_per_week: { type: integer }
+        start_date: { type: string, format: date }
+        target_weeks: { type: integer }
+        pillar_strengths:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ConfidenceLevel' }
+        timezone: { type: string }
+        onboarding_completed_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserProfileUpsert:
+      type: object
+      required: [track_id, target_role, hours_per_week, start_date]
+      properties:
+        track_id: { type: string, format: uuid }
+        years_experience: { type: number, minimum: 0 }
+        target_company_id: { type: [string, 'null'], format: uuid }
+        target_role: { type: string }
+        target_level: { type: [string, 'null'] }
+        hours_per_week: { type: integer, minimum: 1, maximum: 80 }
+        start_date: { type: string, format: date }
+        target_weeks: { type: integer, minimum: 1, maximum: 52, default: 12 }
+        pillar_strengths:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/ConfidenceLevel' }
+        timezone: { type: string, default: UTC }
+        intake_answers: { type: object, additionalProperties: true }
+
+    # ---- Curriculum ----
+    GenerateRoadmapRequest:
+      type: object
+      properties:
+        regenerate: { type: boolean, default: false, description: Archive existing active roadmap and regenerate }
+        use_ai: { type: boolean, default: false }
+    Roadmap:
+      type: object
+      required: [id, user_id, track_id, start_date, end_date, total_weeks, is_active]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        profile_id: { type: string, format: uuid }
+        target_company_id: { type: [string, 'null'], format: uuid }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        total_weeks: { type: integer }
+        hours_per_week: { type: integer }
+        status: { type: string, enum: [active, completed, archived] }
+        is_active: { type: boolean }
+        generated_by: { type: string, enum: [engine, ai] }
+        weeks:
+          type: array
+          items: { $ref: '#/components/schemas/RoadmapWeek' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RoadmapWeek:
+      type: object
+      required: [id, roadmap_id, week_number, start_date, end_date]
+      properties:
+        id: { type: string, format: uuid }
+        roadmap_id: { type: string, format: uuid }
+        week_number: { type: integer }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        theme: { type: [string, 'null'] }
+        focus_pillars:
+          type: array
+          items: { $ref: '#/components/schemas/PillarType' }
+        planned_hours: { type: number }
+        days:
+          type: array
+          items: { $ref: '#/components/schemas/PlanDay' }
+    PlanDay:
+      type: object
+      required: [id, date, planned_minutes]
+      properties:
+        id: { type: string, format: uuid }
+        roadmap_week_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        date: { type: string, format: date }
+        planned_minutes: { type: integer }
+        completed_minutes: { type: integer }
+        is_rest_day: { type: boolean }
+        summary: { type: [string, 'null'] }
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/PlanTask' }
+    PlanTask:
+      type: object
+      required: [id, kind, item_type, item_id, pillar_type, title, status]
+      properties:
+        id: { type: string, format: uuid }
+        plan_day_id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/TaskKind' }
+        item_type: { $ref: '#/components/schemas/PlanItemType' }
+        item_id: { type: string, format: uuid }
+        pillar_type: { $ref: '#/components/schemas/PillarType' }
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        objectives: { type: array, items: { type: string } }
+        estimated_minutes: { type: integer }
+        priority: { $ref: '#/components/schemas/Priority' }
+        difficulty: { oneOf: [ { $ref: '#/components/schemas/Difficulty' }, { type: 'null' } ] }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        sort_order: { type: integer }
+        confidence: { oneOf: [ { $ref: '#/components/schemas/ConfidenceLevel' }, { type: 'null' } ] }
+        time_spent_minutes: { type: [integer, 'null'] }
+        completion_notes: { type: [string, 'null'] }
+        revision_item_id: { type: [string, 'null'], format: uuid }
+        completed_at: { type: [string, 'null'], format: date-time }
+    CompleteTaskRequest:
+      type: object
+      required: [confidence, time_spent_minutes]
+      properties:
+        confidence: { $ref: '#/components/schemas/ConfidenceLevel' }
+        time_spent_minutes: { type: integer, minimum: 0 }
+        notes: { type: string }
+    CompleteTaskResponse:
+      type: object
+      required: [task]
+      properties:
+        task: { $ref: '#/components/schemas/PlanTask' }
+        revision_item: { oneOf: [ { $ref: '#/components/schemas/RevisionItem' }, { type: 'null' } ] }
+        streak: { $ref: '#/components/schemas/StreakResponse' }
+    SkipTaskRequest:
+      type: object
+      properties:
+        reason: { type: string }
+    RescheduleTaskRequest:
+      type: object
+      required: [to_date]
+      properties:
+        to_date: { type: string, format: date }
+
+    # ---- Content ----
+    Track:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        seniority: { type: [string, 'null'] }
+        is_active: { type: boolean }
+        sort_order: { type: integer }
+    Pillar:
+      type: object
+      required: [id, track_id, type, name]
+      properties:
+        id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/PillarType' }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        weight: { type: number }
+        sort_order: { type: integer }
+    Topic:
+      type: object
+      required: [id, pillar_id, track_id, slug, name, difficulty, priority]
+      properties:
+        id: { type: string, format: uuid }
+        pillar_id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        summary: { type: [string, 'null'] }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        estimated_hours: { type: number }
+        sort_order: { type: integer }
+    TopicDetail:
+      allOf:
+        - $ref: '#/components/schemas/Topic'
+        - type: object
+          properties:
+            concept_md: { type: [string, 'null'] }
+            common_mistakes: { type: [string, 'null'] }
+            expected_questions: { type: array, items: { type: string } }
+            prerequisites: { type: array, items: { type: string, format: uuid } }
+            subtopics: { type: array, items: { $ref: '#/components/schemas/Subtopic' } }
+            resources: { type: array, items: { $ref: '#/components/schemas/Resource' } }
+            progress: { oneOf: [ { $ref: '#/components/schemas/UserTopicProgress' }, { type: 'null' } ] }
+    Subtopic:
+      type: object
+      required: [id, topic_id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        topic_id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        content_md: { type: [string, 'null'] }
+        estimated_hours: { type: number }
+        sort_order: { type: integer }
+    Resource:
+      type: object
+      required: [id, type, title]
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/ResourceType' }
+        title: { type: string }
+        author: { type: [string, 'null'] }
+        url: { type: [string, 'null'], format: uri }
+        provider: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        estimated_minutes: { type: [integer, 'null'] }
+        difficulty: { oneOf: [ { $ref: '#/components/schemas/Difficulty' }, { type: 'null' } ] }
+        priority: { $ref: '#/components/schemas/Priority' }
+        is_free: { type: boolean }
+
+    # ---- DSA ----
+    Problem:
+      type: object
+      required: [id, track_id, slug, title, difficulty]
+      properties:
+        id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        topic_id: { type: [string, 'null'], format: uuid }
+        slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        platform: { $ref: '#/components/schemas/ProblemPlatform' }
+        external_id: { type: [string, 'null'] }
+        url: { type: [string, 'null'], format: uri }
+        estimated_minutes: { type: integer }
+        frequency_score: { type: number }
+        is_premium: { type: boolean }
+    ProblemDetail:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            prompt_summary: { type: [string, 'null'] }
+            approach_md: { type: [string, 'null'] }
+            common_mistakes: { type: [string, 'null'] }
+            patterns: { type: array, items: { $ref: '#/components/schemas/Pattern' } }
+            sources: { type: array, items: { $ref: '#/components/schemas/ProblemSource' } }
+            company_frequency: { type: array, items: { $ref: '#/components/schemas/ProblemCompanyFrequency' } }
+            progress: { oneOf: [ { $ref: '#/components/schemas/UserProblemProgress' }, { type: 'null' } ] }
+    Pattern:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        when_to_use: { type: [string, 'null'] }
+    ProblemSource:
+      type: object
+      required: [source]
+      properties:
+        source: { $ref: '#/components/schemas/ProblemSourceName' }
+        source_rank: { type: [integer, 'null'] }
+        source_url: { type: [string, 'null'], format: uri }
+    ProblemCompanyFrequency:
+      type: object
+      required: [company_id, frequency]
+      properties:
+        company_id: { type: string, format: uuid }
+        company_name: { type: string }
+        frequency: { type: number }
+        last_seen_period: { type: [string, 'null'] }
+
+    # ---- Design / LLD ----
+    DesignProblem:
+      type: object
+      required: [id, slug, title, difficulty, order_index]
+      properties:
+        id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        order_index: { type: integer }
+    DesignProblemDetail:
+      allOf:
+        - $ref: '#/components/schemas/DesignProblem'
+        - type: object
+          properties:
+            requirements_md: { type: [string, 'null'] }
+            capacity_estimation_md: { type: [string, 'null'] }
+            api_design_md: { type: [string, 'null'] }
+            data_model_md: { type: [string, 'null'] }
+            high_level_design_md: { type: [string, 'null'] }
+            caching_md: { type: [string, 'null'] }
+            queueing_md: { type: [string, 'null'] }
+            scaling_md: { type: [string, 'null'] }
+            tradeoffs_md: { type: [string, 'null'] }
+            failure_handling_md: { type: [string, 'null'] }
+            alternatives_md: { type: [string, 'null'] }
+            interview_tips_md: { type: [string, 'null'] }
+            follow_up_questions: { type: array, items: { type: string } }
+    LLDProblem:
+      type: object
+      required: [id, slug, title, difficulty, order_index]
+      properties:
+        id: { type: string, format: uuid }
+        track_id: { type: string, format: uuid }
+        slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        order_index: { type: integer }
+    LLDProblemDetail:
+      allOf:
+        - $ref: '#/components/schemas/LLDProblem'
+        - type: object
+          properties:
+            requirements_md: { type: [string, 'null'] }
+            entities_md: { type: [string, 'null'] }
+            class_diagram_md: { type: [string, 'null'] }
+            design_patterns: { type: array, items: { type: string } }
+            solid_notes_md: { type: [string, 'null'] }
+            api_or_interface_md: { type: [string, 'null'] }
+            tradeoffs_md: { type: [string, 'null'] }
+            follow_up_questions: { type: array, items: { type: string } }
+
+    # ---- Company ----
+    Company:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        logo_url: { type: [string, 'null'], format: uri }
+        description: { type: [string, 'null'] }
+        is_fully_weighted: { type: boolean }
+    CompanyDetail:
+      allOf:
+        - $ref: '#/components/schemas/Company'
+        - type: object
+          properties:
+            interview_style_md: { type: [string, 'null'] }
+            weights: { type: array, items: { $ref: '#/components/schemas/CompanyWeight' } }
+    CompanyWeight:
+      type: object
+      required: [weight_multiplier]
+      properties:
+        pillar_id: { type: [string, 'null'], format: uuid }
+        topic_id: { type: [string, 'null'], format: uuid }
+        weight_multiplier: { type: number }
+        note: { type: [string, 'null'] }
+    SetTargetCompanyRequest:
+      type: object
+      required: [company_id]
+      properties:
+        company_id: { type: string, format: uuid }
+        reweight_roadmap: { type: boolean, default: true }
+
+    # ---- Progress ----
+    UserTopicProgress:
+      type: object
+      required: [id, user_id, topic_id, status]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        topic_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ProgressStatus' }
+        confidence: { oneOf: [ { $ref: '#/components/schemas/ConfidenceLevel' }, { type: 'null' } ] }
+        time_spent_minutes: { type: integer }
+        times_revised: { type: integer }
+        last_studied_at: { type: [string, 'null'], format: date-time }
+        notes: { type: [string, 'null'] }
+    UserProblemProgress:
+      type: object
+      required: [id, user_id, problem_id, status, solved]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        problem_id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ProgressStatus' }
+        confidence: { oneOf: [ { $ref: '#/components/schemas/ConfidenceLevel' }, { type: 'null' } ] }
+        attempts: { type: integer }
+        solved: { type: boolean }
+        time_spent_minutes: { type: integer }
+        last_attempt_at: { type: [string, 'null'], format: date-time }
+        solved_at: { type: [string, 'null'], format: date-time }
+        notes: { type: [string, 'null'] }
+
+    # ---- Revision ----
+    RevisionItem:
+      type: object
+      required: [id, user_id, item_type, item_id, pillar_type, interval_days, due_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        item_type: { $ref: '#/components/schemas/PlanItemType' }
+        item_id: { type: string, format: uuid }
+        pillar_type: { $ref: '#/components/schemas/PillarType' }
+        title: { type: string, description: Resolved title of the underlying item }
+        interval_days: { type: integer }
+        stage: { type: integer }
+        ease: { type: number, description: "reserved (inert at GA)" }
+        due_at: { type: string, format: date }
+        last_reviewed_at: { type: [string, 'null'], format: date-time }
+        last_recall: { oneOf: [ { $ref: '#/components/schemas/RecallResult' }, { type: 'null' } ] }
+        review_count: { type: integer }
+        lapse_count: { type: integer }
+        is_active: { type: boolean }
+    RecallRequest:
+      type: object
+      required: [recall]
+      properties:
+        recall: { $ref: '#/components/schemas/RecallResult' }
+        time_spent_minutes: { type: integer, minimum: 0 }
+        notes: { type: string }
+
+    # ---- Behavioral ----
+    BehavioralStory:
+      type: object
+      required: [id, user_id, title, theme]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        title: { type: string }
+        theme: { $ref: '#/components/schemas/StoryTheme' }
+        situation: { type: [string, 'null'] }
+        task: { type: [string, 'null'] }
+        action: { type: [string, 'null'] }
+        result: { type: [string, 'null'] }
+        metrics: { type: [string, 'null'] }
+        tags: { type: array, items: { type: string } }
+        ai_improved: { type: boolean }
+        strength_score: { type: [number, 'null'] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    BehavioralStoryUpsert:
+      type: object
+      required: [title, theme]
+      properties:
+        title: { type: string }
+        theme: { $ref: '#/components/schemas/StoryTheme' }
+        situation: { type: string }
+        task: { type: string }
+        action: { type: string }
+        result: { type: string }
+        metrics: { type: string }
+        tags: { type: array, items: { type: string } }
+    StoryImproveResponse:
+      type: object
+      required: [story_id, suggestions]
+      properties:
+        story_id: { type: string, format: uuid }
+        improved:
+          type: object
+          properties:
+            situation: { type: string }
+            task: { type: string }
+            action: { type: string }
+            result: { type: string }
+            metrics: { type: string }
+        suggestions: { type: array, items: { type: string } }
+        strength_score: { type: number }
+        used_fallback: { type: boolean }
+
+    # ---- Resume ----
+    ResumeProfile:
+      type: object
+      required: [id, user_id]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        headline: { type: [string, 'null'] }
+        summary: { type: [string, 'null'] }
+        years_experience: { type: [number, 'null'] }
+        skills: { type: array, items: { type: string } }
+        target_keywords: { type: array, items: { type: string } }
+        ats_score: { type: [number, 'null'] }
+        last_scored_at: { type: [string, 'null'], format: date-time }
+        projects: { type: array, items: { $ref: '#/components/schemas/ResumeProject' } }
+    ResumeProfileUpsert:
+      type: object
+      properties:
+        headline: { type: string }
+        summary: { type: string }
+        years_experience: { type: number, minimum: 0 }
+        skills: { type: array, items: { type: string } }
+        target_keywords: { type: array, items: { type: string } }
+    ResumeProject:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        resume_profile_id: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        impact: { type: [string, 'null'] }
+        metrics: { type: array, items: { type: string } }
+        tech_stack: { type: array, items: { type: string } }
+        start_date: { type: [string, 'null'], format: date }
+        end_date: { type: [string, 'null'], format: date }
+        sort_order: { type: integer }
+    ResumeProjectUpsert:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        role: { type: string }
+        description: { type: string }
+        impact: { type: string }
+        metrics: { type: array, items: { type: string } }
+        tech_stack: { type: array, items: { type: string } }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        sort_order: { type: integer }
+    ResumeScoreResponse:
+      type: object
+      required: [ats_score]
+      properties:
+        ats_score: { type: number }
+        keyword_matches: { type: array, items: { type: string } }
+        missing_keywords: { type: array, items: { type: string } }
+        suggestions: { type: array, items: { type: string } }
+        used_fallback: { type: boolean }
+
+    # ---- Mock ----
+    MockInterview:
+      type: object
+      required: [id, user_id, type, outcome]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/MockType' }
+        topic_id: { type: [string, 'null'], format: uuid }
+        design_problem_id: { type: [string, 'null'], format: uuid }
+        company_id: { type: [string, 'null'], format: uuid }
+        scheduled_at: { type: [string, 'null'], format: date-time }
+        conducted_at: { type: [string, 'null'], format: date-time }
+        duration_minutes: { type: [integer, 'null'] }
+        outcome: { $ref: '#/components/schemas/MockOutcome' }
+        overall_score: { type: [number, 'null'] }
+        interviewer: { type: [string, 'null'] }
+        summary: { type: [string, 'null'] }
+        created_at: { type: string, format: date-time }
+    MockInterviewDetail:
+      allOf:
+        - $ref: '#/components/schemas/MockInterview'
+        - type: object
+          properties:
+            transcript_md: { type: [string, 'null'] }
+            findings: { type: array, items: { $ref: '#/components/schemas/MockFinding' } }
+    MockInterviewUpsert:
+      type: object
+      required: [type]
+      properties:
+        type: { $ref: '#/components/schemas/MockType' }
+        topic_id: { type: string, format: uuid }
+        design_problem_id: { type: string, format: uuid }
+        company_id: { type: string, format: uuid }
+        scheduled_at: { type: string, format: date-time }
+        conducted_at: { type: string, format: date-time }
+        duration_minutes: { type: integer, minimum: 0 }
+        outcome: { $ref: '#/components/schemas/MockOutcome' }
+        overall_score: { type: number, minimum: 0, maximum: 100 }
+        interviewer: { type: string }
+        transcript_md: { type: string }
+        summary: { type: string }
+    MockFinding:
+      type: object
+      required: [id, mock_interview_id, severity, category, detail]
+      properties:
+        id: { type: string, format: uuid }
+        mock_interview_id: { type: string, format: uuid }
+        pillar_type: { oneOf: [ { $ref: '#/components/schemas/PillarType' }, { type: 'null' } ] }
+        topic_id: { type: [string, 'null'], format: uuid }
+        severity: { $ref: '#/components/schemas/FindingSeverity' }
+        category: { type: string }
+        detail: { type: string }
+        remediation_task_id: { type: [string, 'null'], format: uuid }
+    MockFindingUpsert:
+      type: object
+      required: [severity, category, detail]
+      properties:
+        pillar_type: { $ref: '#/components/schemas/PillarType' }
+        topic_id: { type: string, format: uuid }
+        severity: { $ref: '#/components/schemas/FindingSeverity' }
+        category: { type: string }
+        detail: { type: string }
+        create_remediation_task: { type: boolean, default: false }
+
+    # ---- Analytics ----
+    DashboardResponse:
+      type: object
+      required: [overall_readiness, pillar_readiness, study_streak, today, revision_due_count, generated_at]
+      properties:
+        overall_readiness: { type: number, format: float, minimum: 0, maximum: 100 }
+        estimated_readiness_date: { type: [string, 'null'], format: date }
+        pillar_readiness:
+          type: array
+          items:
+            type: object
+            required: [pillar, readiness, coverage, avg_confidence, revision_health]
+            properties:
+              pillar: { $ref: '#/components/schemas/PillarType' }
+              readiness: { type: number, format: float }
+              coverage: { type: number, format: float }
+              avg_confidence: { type: number, format: float }
+              revision_health: { type: number, format: float }
+        study_streak:
+          type: object
+          required: [current, longest]
+          properties:
+            current: { type: integer }
+            longest: { type: integer }
+        today:
+          type: object
+          required: [date, total_tasks, completed_tasks, estimated_hours, remaining_hours]
+          properties:
+            date: { type: string, format: date }
+            total_tasks: { type: integer }
+            completed_tasks: { type: integer }
+            estimated_hours: { type: number, format: float }
+            remaining_hours: { type: number, format: float }
+        revision_due_count: { type: integer }
+        generated_at: { type: string, format: date-time }
+    ReadinessSnapshot:
+      type: object
+      required: [snapshot_date, overall_readiness]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        roadmap_id: { type: [string, 'null'], format: uuid }
+        snapshot_date: { type: string, format: date }
+        overall_readiness: { type: number }
+        pillar_readiness:
+          type: object
+          additionalProperties: { type: number }
+        completion_pct: { type: number }
+        avg_confidence: { type: [number, 'null'] }
+        revision_health: { type: [number, 'null'] }
+        estimated_ready_date: { type: [string, 'null'], format: date }
+        weak_topics: { type: array, items: { type: string, format: uuid } }
+        strong_topics: { type: array, items: { type: string, format: uuid } }
+    StreakResponse:
+      type: object
+      required: [current_streak, longest_streak]
+      properties:
+        current_streak: { type: integer }
+        longest_streak: { type: integer }
+        days:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string, format: date }
+              tasks_completed: { type: integer }
+              minutes_studied: { type: integer }
+              goal_met: { type: boolean }
+    TopicAnalyticsResponse:
+      type: object
+      properties:
+        weak:
+          type: array
+          items: { $ref: '#/components/schemas/TopicAnalyticsEntry' }
+        strong:
+          type: array
+          items: { $ref: '#/components/schemas/TopicAnalyticsEntry' }
+    TopicAnalyticsEntry:
+      type: object
+      properties:
+        topic_id: { type: string, format: uuid }
+        topic_name: { type: string }
+        pillar_type: { $ref: '#/components/schemas/PillarType' }
+        confidence: { oneOf: [ { $ref: '#/components/schemas/ConfidenceLevel' }, { type: 'null' } ] }
+        completion_pct: { type: number }
+        revision_accuracy: { type: [number, 'null'] }
+    TimeSpentResponse:
+      type: object
+      properties:
+        total_minutes: { type: integer }
+        group_by: { type: string, enum: [day, pillar] }
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string, description: Date (YYYY-MM-DD) or pillar_type }
+              minutes: { type: integer }
+
+    # ---- Notifications ----
+    Notification:
+      type: object
+      required: [id, type, status, title]
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/NotificationType' }
+        channel: { $ref: '#/components/schemas/NotificationChannel' }
+        status: { $ref: '#/components/schemas/NotificationStatus' }
+        title: { type: string }
+        body: { type: [string, 'null'] }
+        payload: { type: object, additionalProperties: true }
+        read_at: { type: [string, 'null'], format: date-time }
+        created_at: { type: string, format: date-time }
+
+    # ---- AI ----
+    AIPlannerRequest:
+      type: object
+      properties:
+        roadmap_id: { type: string, format: uuid }
+        focus_pillars: { type: array, items: { $ref: '#/components/schemas/PillarType' } }
+        notes: { type: string }
+    AICoachRequest:
+      type: object
+      required: [message]
+      properties:
+        message: { type: string }
+        context_topic_id: { type: string, format: uuid }
+    AIStoryImproveRequest:
+      type: object
+      properties:
+        story_id: { type: string, format: uuid }
+        situation: { type: string }
+        task: { type: string }
+        action: { type: string }
+        result: { type: string }
+    AIDailyPlanRequest:
+      type: object
+      properties:
+        date: { type: string, format: date }
+    AISdReviewRequest:
+      type: object
+      required: [design_problem_id, answer_md]
+      properties:
+        design_problem_id: { type: string, format: uuid }
+        answer_md: { type: string }
+    WeaknessDetectResponse:
+      type: object
+      properties:
+        weak_topics: { type: array, items: { $ref: '#/components/schemas/TopicAnalyticsEntry' } }
+        recommended_tasks: { type: array, items: { type: string } }
+        used_fallback: { type: boolean }
+    AIResponse:
+      type: object
+      required: [feature, content]
+      properties:
+        feature: { $ref: '#/components/schemas/AIFeature' }
+        content: { type: string, description: Markdown response }
+        structured: { type: object, additionalProperties: true }
+        model: { type: [string, 'null'] }
+        used_fallback: { type: boolean }
+        invocation_id: { type: string, format: uuid }
