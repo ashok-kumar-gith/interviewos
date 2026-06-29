@@ -1,11 +1,13 @@
 import {
   Binary,
+  Bot,
   Boxes,
   CalendarRange,
   Clock,
   FileText,
   LayoutDashboard,
   Library,
+  LineChart,
   type LucideIcon,
   MessagesSquare,
   Mic,
@@ -36,6 +38,7 @@ export const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "Today", icon: Sparkles },
   { href: "/roadmap", label: "Roadmap", icon: CalendarRange },
+  { href: "/analytics", label: "Analytics", icon: LineChart },
 ];
 
 /** Pillar nav — fixed order, fixed icons (DESIGN-SYSTEM §2.3 / §9). */
@@ -50,6 +53,7 @@ export const PILLAR_NAV: NavItem[] = [
 
 /** Utility nav — secondary destinations pinned to the sidebar bottom. */
 export const UTILITY_NAV: NavItem[] = [
+  { href: "/coach", label: "AI Coach", icon: Bot },
   { href: "/resources", label: "Resources", icon: Library },
   { href: "/revision", label: "Revision", icon: Clock },
   { href: "/mock", label: "Mocks", icon: Mic },

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
+  generateNotifications,
   listNotifications,
   markAllNotificationsRead,
   markNotificationRead,
@@ -58,6 +59,19 @@ export default function NotificationsPage() {
     onSettled: () => void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY }),
   });
 
+  const generateMutation = useMutation({
+    mutationFn: () => generateNotifications(),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: NOTIFICATIONS_KEY }),
+  });
+
+  const hasGenerated = React.useRef(false);
+  React.useEffect(() => {
+    if (hasGenerated.current) return;
+    hasGenerated.current = true;
+    generateMutation.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const notifications = query.data ?? [];
   const unreadCount = notifications.filter((n) => n.status === "unread").length;
 
@@ -70,15 +84,24 @@ export default function NotificationsPage() {
             {unreadCount > 0 ? `${unreadCount} unread` : "You're all caught up."}
           </p>
         </div>
-        {unreadCount > 0 && (
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
-            onClick={() => markAllMutation.mutate()}
-            loading={markAllMutation.isPending}
+            onClick={() => generateMutation.mutate()}
+            loading={generateMutation.isPending}
           >
-            <CheckCheck aria-hidden /> Mark all read
+            <RefreshCw aria-hidden /> Refresh
           </Button>
-        )}
+          {unreadCount > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => markAllMutation.mutate()}
+              loading={markAllMutation.isPending}
+            >
+              <CheckCheck aria-hidden /> Mark all read
+            </Button>
+          )}
+        </div>
       </header>
 
       {query.isLoading ? (

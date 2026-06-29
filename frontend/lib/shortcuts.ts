@@ -34,6 +34,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["g", "r"], description: "Roadmap" },
       { keys: ["g", "p"], description: "Problems (DSA)" },
       { keys: ["g", "b"], description: "Behavioral" },
+      { keys: ["g", "a"], description: "Analytics" },
+      { keys: ["g", "v"], description: "Revision" },
       { keys: ["g", "s"], description: "Settings" },
     ],
   },
@@ -55,6 +57,7 @@ export const GO_TO_MAP: Record<string, string> = {
   r: "/roadmap",
   p: "/problems",
   b: "/behavioral",
+  a: "/analytics",
   s: "/settings",
   v: "/revision",
 };
@@ -80,13 +83,16 @@ export const NAV_COMMANDS: CommandItem[] = [
   { id: "nav-dashboard", label: "Dashboard", group: "Navigate", kind: "navigate", href: "/dashboard", shortcut: ["g", "d"], keywords: "home readiness" },
   { id: "nav-today", label: "Today", group: "Navigate", kind: "navigate", href: "/today", shortcut: ["g", "t"], keywords: "tasks plan" },
   { id: "nav-roadmap", label: "Roadmap", group: "Navigate", kind: "navigate", href: "/roadmap", shortcut: ["g", "r"], keywords: "plan weeks timeline" },
+  { id: "nav-analytics", label: "Analytics", group: "Navigate", kind: "navigate", href: "/analytics", shortcut: ["g", "a"], keywords: "progress readiness trend charts time spent topics" },
   { id: "nav-problems", label: "Problems", group: "Navigate", kind: "navigate", href: "/problems", shortcut: ["g", "p"], keywords: "dsa leetcode coding" },
   { id: "nav-system-design", label: "System Design", group: "Navigate", kind: "navigate", href: "/system-design", keywords: "hld architecture" },
   { id: "nav-lld", label: "LLD", group: "Navigate", kind: "navigate", href: "/lld", keywords: "low level design oop patterns" },
   { id: "nav-backend", label: "Backend Engineering", group: "Navigate", kind: "navigate", href: "/backend-engineering", keywords: "backend depth" },
   { id: "nav-behavioral", label: "Behavioral", group: "Navigate", kind: "navigate", href: "/behavioral", shortcut: ["g", "b"], keywords: "star stories" },
   { id: "nav-resume", label: "Resume", group: "Navigate", kind: "navigate", href: "/resume", keywords: "ats score cv" },
+  { id: "nav-coach", label: "AI Coach", group: "Navigate", kind: "navigate", href: "/coach", keywords: "ai assistant ask question help chat" },
   { id: "nav-resources", label: "Resource Library", group: "Navigate", kind: "navigate", href: "/resources", keywords: "books videos articles courses" },
+  { id: "nav-revision", label: "Revision", group: "Navigate", kind: "navigate", href: "/revision", shortcut: ["g", "v"], keywords: "spaced repetition recall review due" },
   { id: "nav-mock", label: "Mock Interviews", group: "Navigate", kind: "navigate", href: "/mock", keywords: "practice interview" },
   { id: "nav-settings", label: "Settings", group: "Navigate", kind: "navigate", href: "/settings", shortcut: ["g", "s"], keywords: "preferences account" },
 ];
@@ -96,6 +102,8 @@ export const ACTION_COMMANDS: CommandItem[] = [
   { id: "action-roadmap", label: "Generate roadmap", group: "Actions", kind: "navigate", href: "/intake", keywords: "plan create intake start" },
   { id: "action-log-mock", label: "Log a mock", group: "Actions", kind: "navigate", href: "/mock", keywords: "record interview result" },
   { id: "action-today", label: "Go to today's tasks", group: "Actions", kind: "navigate", href: "/today", keywords: "plan tasks" },
+  { id: "action-ask-coach", label: "Ask the AI coach", group: "Actions", kind: "navigate", href: "/coach", keywords: "ai help question assistant" },
+  { id: "action-review-due", label: "Review due items", group: "Actions", kind: "navigate", href: "/revision", keywords: "spaced repetition recall flashcards" },
 ];
 
 export const ALL_COMMANDS: CommandItem[] = [...NAV_COMMANDS, ...ACTION_COMMANDS];

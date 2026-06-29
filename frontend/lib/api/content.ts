@@ -287,6 +287,24 @@ export function getTopic(id: string): Promise<TopicDetail> {
   return api.get<TopicDetail>(`/topics/${id}`);
 }
 
+/* ---- Backend Engineering (pillar-scoped topics) ---- */
+
+/** GET /backend-engineering/topics — paginated backend engineering topics. */
+export function listBackendEngineeringTopics(filters: {
+  page?: number;
+  page_size?: number;
+  difficulty?: Difficulty;
+  priority?: Priority;
+  q?: string;
+} = {}): Promise<ListResult<Topic>> {
+  return api.getList<Topic>("/backend-engineering/topics", { query: { ...filters } });
+}
+
+/** GET /backend-engineering/topics/{id} — a backend engineering topic detail. */
+export function getBackendEngineeringTopic(id: string): Promise<TopicDetail> {
+  return api.get<TopicDetail>(`/backend-engineering/topics/${id}`);
+}
+
 export interface ResourceFilters {
   page?: number;
   page_size?: number;

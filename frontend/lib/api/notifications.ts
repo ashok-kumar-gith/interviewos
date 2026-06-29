@@ -47,3 +47,10 @@ export function markNotificationRead(id: string): Promise<Notification> {
 export function markAllNotificationsRead(): Promise<void> {
   return api.post<void>("/notifications/read-all");
 }
+
+/** POST /notifications/generate — idempotently generate today's digest notifications. */
+export function generateNotifications(): Promise<Notification[]> {
+  return api
+    .post<{ data: Notification[]; count: number }>("/notifications/generate")
+    .then((r) => r.data);
+}
