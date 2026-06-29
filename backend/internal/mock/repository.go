@@ -32,6 +32,9 @@ type Repository interface {
 
 	// AddFinding inserts a finding (the caller has verified mock ownership).
 	AddFinding(ctx context.Context, f *Finding) error
+	// UpdateFinding persists changes to an existing finding (e.g. linking a
+	// scheduled remediation_task_id).
+	UpdateFinding(ctx context.Context, f *Finding) error
 	// ListFindings returns all of a user's findings (across mocks), newest first.
 	// Used by the weakness aggregator.
 	ListFindings(ctx context.Context, userID uuid.UUID) ([]Finding, error)
@@ -145,6 +148,10 @@ func (r *gormRepository) Delete(ctx context.Context, userID, id uuid.UUID) error
 
 func (r *gormRepository) AddFinding(ctx context.Context, f *Finding) error {
 	return r.db.WithContext(ctx).Create(f).Error
+}
+
+func (r *gormRepository) UpdateFinding(ctx context.Context, f *Finding) error {
+	return r.db.WithContext(ctx).Save(f).Error
 }
 
 func (r *gormRepository) ListFindings(ctx context.Context, userID uuid.UUID) ([]Finding, error) {

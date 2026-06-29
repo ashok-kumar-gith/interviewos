@@ -7,4 +7,6 @@ import "errors"
 var (
 	// ErrNotFound indicates the requested design problem does not exist.
 	ErrNotFound = errors.New("designproblems: not found")
+	// ErrInvalidProgress indicates a progress payload failed validation (422).
+	ErrInvalidProgress = errors.New("designproblems: invalid progress")
 )

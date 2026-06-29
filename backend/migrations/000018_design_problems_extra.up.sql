@@ -1,0 +1,113 @@
+-- 000018_design_problems_extra.up.sql
+-- Completes the HLD design-problem catalog to the 12 specified in the SRS
+-- (FR-DESIGN-001). 000007 seeded 6 (url-shortener … twitter); this adds the
+-- remaining 6 at order_index 7–12 with full structured content. Idempotent via
+-- ON CONFLICT (slug).
+
+BEGIN;
+
+INSERT INTO design_problems
+    (track_id, slug, title, difficulty, order_index,
+     requirements_md, capacity_estimation_md, api_design_md, data_model_md,
+     high_level_design_md, caching_md, queueing_md, scaling_md, tradeoffs_md,
+     failure_handling_md, alternatives_md, interview_tips_md, follow_up_questions)
+VALUES
+((SELECT id FROM tracks WHERE slug = 'backend-sde3'),
+ 'youtube', 'Design YouTube / a Video Streaming Service', 'hard', 7,
+ 'Functional: upload videos, transcode to multiple resolutions, stream adaptively, search, and recommend. Non-functional: massive read scale, low startup latency, global delivery, and durable storage of petabytes of video.',
+ 'Assume 500 hours of video uploaded per minute and billions of daily views. Raw uploads are huge; after transcoding into several renditions (240p–4K) storage multiplies. Egress, not storage, is the dominant cost — a global CDN is mandatory.',
+ 'POST /videos (resumable/chunked upload) -> {video_id, upload_url}. GET /videos/{id} returns a manifest (HLS/DASH) of rendition + segment URLs. GET /search?q=. The player fetches segments adaptively based on bandwidth.',
+ 'videos(id, owner_id, title, status, duration, created_at), renditions(video_id, resolution, codec, manifest_key), view_events(video_id, ts, region) written asynchronously. Segments + manifests live in object storage fronted by a CDN.',
+ 'Uploads land in object storage and enqueue a transcoding job. A transcoding pipeline (fan-out workers) produces renditions + segmented manifests. The read path serves manifests from the API and segments from the CDN edge.',
+ 'Video segments are immutable, so cache aggressively at multiple CDN tiers; popular content is pinned near viewers. Manifests and metadata cache in Redis. The long tail is served from origin with regional mid-tier caches.',
+ 'Transcoding is queue-driven: each upload fans out into per-rendition jobs on a message queue so encoding scales horizontally and the upload path returns immediately. View/analytics events are also queued.',
+ 'Scale reads with a multi-tier CDN and regional caches; scale transcoding with elastic worker pools. Shard metadata by video_id. Recommendations and search run as separate services off an event stream.',
+ 'Pre-transcoding all renditions costs storage but guarantees instant playback; on-the-fly transcoding saves storage but adds latency. Push (pre-warm CDN) vs pull (cache-on-miss) trades cost for first-view latency.',
+ 'A failed transcoding job is retried with backoff and the video stays in "processing" until at least one rendition is ready. CDN origin shielding protects object storage during cache stampedes; multi-region replication survives an AZ loss.',
+ 'Could lean entirely on a managed media service (AWS MediaConvert + CloudFront). For live streaming, swap the batch pipeline for low-latency HLS/WebRTC ingest.',
+ 'Anchor on egress economics — that is what forces the CDN-first design. Distinguish the upload/transcoding write path from the segment read path; interviewers want to see you separate them.',
+ '["How does adaptive bitrate streaming (HLS/DASH) choose a rendition?", "How would you support live streaming with low latency?", "How do you design the recommendation/feed pipeline?"]'),
+
+((SELECT id FROM tracks WHERE slug = 'backend-sde3'),
+ 'uber', 'Design Uber / a Ride-Sharing Service', 'hard', 8,
+ 'Functional: riders request rides, match to nearby drivers, track location in real time, price trips, and process payment. Non-functional: low-latency geospatial matching, high write throughput of location pings, and strong consistency for trip state.',
+ 'Assume 10M active drivers each sending a location ping every 4 seconds (~2.5M writes/s) and millions of concurrent trips. Location data is hot and ephemeral; trip records are durable. Matching must complete in well under a second.',
+ 'POST /rides {pickup, dropoff} -> matches a driver and returns trip_id. WebSocket/stream for live driver location + ETA. POST /rides/{id}/complete settles fare and payment. Drivers POST location pings continuously.',
+ 'trips(id, rider_id, driver_id, state, fare, started_at, ended_at), driver_locations (in-memory geospatial index, e.g. Redis GEO / quadtree / S2 cells), payments(trip_id, amount, status). Trip state is the source of truth in a SQL store.',
+ 'A location service ingests pings into a geospatial index partitioned by cell. A matching service queries nearby available drivers for a request, reserves one, and creates a trip. A trip service owns the trip state machine; pricing and payment are separate services.',
+ 'Driver locations live in an in-memory geo index (Redis/quadtree) keyed by spatial cell — the cache IS the store for this hot, ephemeral data. Surge/pricing snapshots and ETA estimates are cached briefly per region.',
+ 'Location pings and trip events flow through a queue/stream (Kafka) so the matching and analytics paths are decoupled from ingestion. Payment is processed asynchronously after trip completion with retries.',
+ 'Partition the geo index and matching by spatial cell so each region scales independently. The trip store shards by trip_id. Hot cities get more matching capacity; the stream buffers ping bursts.',
+ 'Pushing every ping to durable storage is wasteful — keep them in memory and only persist trip-level state. Optimistic driver reservation is fast but can double-book under races; a short lock or compare-and-set trades latency for correctness.',
+ 'If the matching service fails, riders retry against another cell partition; in-flight trips are unaffected because trip state is durable. A driver going offline mid-trip is handled by the trip state machine with timeouts and reassignment.',
+ 'Could use a managed geospatial DB (PostGIS) instead of an in-memory index, trading latency for simplicity. H3/S2 cell libraries standardize the spatial partitioning.',
+ 'Lead with the geospatial matching problem and the choice of spatial index — that is the heart of the design. Separate ephemeral location data from durable trip state explicitly.',
+ '["How do you index and query nearby drivers efficiently (quadtree vs geohash vs S2)?", "How would you implement surge pricing?", "How do you guarantee a driver is not matched to two riders at once?"]'),
+
+((SELECT id FROM tracks WHERE slug = 'backend-sde3'),
+ 'google-docs', 'Design Google Docs / Collaborative Editing', 'hard', 9,
+ 'Functional: multiple users edit the same document concurrently with real-time updates, cursor presence, and full version history. Non-functional: low-latency convergence, conflict-free merges, and durability of every edit.',
+ 'Assume documents with up to ~100 concurrent editors and millions of active documents. Edit operations are small and frequent; the challenge is correctness of concurrent merges, not raw storage volume.',
+ 'WebSocket per document session carrying operations (insert/delete at position) and presence. GET /docs/{id} loads a snapshot + recent ops. Periodic snapshots compact the op log. Operations are broadcast to all session participants.',
+ 'documents(id, owner_id, snapshot, version), operations(doc_id, seq, op, author, ts), presence(doc_id, user_id, cursor) in memory. The authoritative state is the ordered operation log plus periodic materialized snapshots.',
+ 'A per-document collaboration server (sticky-routed) holds the live state, sequences incoming operations, transforms them against concurrent ops, and broadcasts the result. Operations are appended to a durable log; snapshots are written periodically.',
+ 'The live document state is held in memory on the owning collaboration node (the cache is the working copy); snapshots in object storage and recent ops in Redis speed cold loads. Presence/cursor data is ephemeral and memory-only.',
+ 'Operations are appended to a durable, ordered log (per-doc partition) so history and recovery are exact; snapshotting runs asynchronously to compact the log without blocking edits.',
+ 'Route all sessions for one document to a single owning node (consistent hashing by doc_id) so ordering is authoritative; scale across documents horizontally. Failover replays the op log onto a new node.',
+ 'Operational Transformation (OT) is battle-tested but complex to implement correctly; CRDTs converge without a central transformer but carry metadata overhead. Central sequencing simplifies ordering at the cost of a per-doc hotspot.',
+ 'If the owning node dies, a replacement loads the latest snapshot and replays the tail of the op log to reconstruct state; clients reconnect and resync from their last acknowledged version. Unacked client ops are retransmitted.',
+ 'Could use a CRDT library (Yjs/Automerge) and a generic sync backend instead of bespoke OT. A simpler design locks sections rather than merging character-level edits, trading concurrency for simplicity.',
+ 'Name the core problem early: concurrent edits need OT or CRDTs to converge. Explain why a single sequencer per document is the pragmatic choice and how you recover its state.',
+ '["Compare Operational Transformation and CRDTs for this problem.", "How do you store and compact version history efficiently?", "How do you show real-time cursor presence at scale?"]'),
+
+((SELECT id FROM tracks WHERE slug = 'backend-sde3'),
+ 'payment-gateway', 'Design a Payment Gateway', 'hard', 10,
+ 'Functional: accept payments, route to processors, handle authorization/capture/refund, and reconcile. Non-functional: exactly-once financial effect (no double charge), auditability, idempotency, and PCI-compliant handling of card data.',
+ 'Assume 10K payments/s at peak. Money correctness dominates over raw scale: every state transition must be durable, idempotent, and auditable. External processors are slow and occasionally fail, so async retries and reconciliation are essential.',
+ 'POST /payments {amount, method, idempotency_key} -> {payment_id, status}. POST /payments/{id}/capture, POST /payments/{id}/refund. Processor webhooks update status asynchronously. Every mutating call requires an Idempotency-Key.',
+ 'payments(id, idempotency_key UNIQUE, amount, currency, state, processor_ref), ledger_entries(payment_id, type, amount, created_at) as an append-only double-entry ledger, webhook_events(id, processed). The ledger — never a mutable balance column — is the source of truth.',
+ 'A payment API validates and records an intent (idempotency_key enforced by a unique constraint), then a state machine (created -> authorized -> captured/failed/refunded) drives processor calls. A reconciliation job compares internal state against processor reports.',
+ 'Caching is minimal and deliberate — money state must be read from the durable store. Idempotency-key lookups may be cached briefly, but authorization/capture decisions always read committed state to avoid acting on stale data.',
+ 'Processor calls and webhook processing run through a durable queue with retries and dead-letter handling, so a slow or failing processor never blocks the API and no event is lost. Outbox pattern guarantees event publication matches DB commits.',
+ 'Partition by payment_id/merchant; the ledger is append-only so it scales by sharding. Throughput is bounded more by external processors than internal compute, so backpressure and per-processor rate limiting matter more than horizontal scale.',
+ 'A unique idempotency key plus an append-only ledger gives exactly-once semantics at the cost of write amplification. Synchronous capture is simpler but couples you to processor latency; async capture needs a reconciliation safety net.',
+ 'On a processor timeout the payment stays "authorizing" and is retried idempotently — never double-charged thanks to the idempotency key. Reconciliation catches any divergence between internal state and processor truth and repairs it.',
+ 'Could adopt an event-sourced design where the ledger IS the event log, or use a managed gateway (Stripe) and design only the orchestration around it.',
+ 'Lead with correctness, not scale: idempotency keys, a double-entry ledger, and reconciliation. Interviewers probe how you avoid double charges and how you recover from processor failures.',
+ '["How does an idempotency key prevent a double charge on retry?", "Why a double-entry ledger instead of a mutable balance?", "How do you reconcile against the external processor?"]'),
+
+((SELECT id FROM tracks WHERE slug = 'backend-sde3'),
+ 'slack', 'Design Slack / a Team Messaging Platform', 'hard', 11,
+ 'Functional: channels and DMs, real-time message delivery, presence, threads, search, and history across many workspaces. Non-functional: low-latency fan-out to channel members, durable message history, and isolation between workspaces.',
+ 'Assume 100K workspaces, large channels with tens of thousands of members, and millions of concurrent WebSocket connections. Fan-out to large channels and durable, searchable history are the main pressures.',
+ 'WebSocket per client for real-time send/receive and presence. POST /messages {channel_id, body}. GET /channels/{id}/history (paginated). Search via a dedicated index. Connections are managed by a gateway tier.',
+ 'messages(id, channel_id, author_id, body, ts), channels(id, workspace_id, type), memberships(channel_id, user_id, last_read). Messages are partitioned by channel_id; a search index (Elasticsearch) mirrors message text.',
+ 'A connection gateway holds WebSockets and subscribes clients to channels. A message service persists messages and publishes to a fan-out layer (pub/sub) that pushes to gateways holding subscribed connections. History is read from the partitioned store.',
+ 'Recent messages per channel are cached for fast history loads and reconnect catch-up; presence is held in memory. Membership lists for large channels are cached to make fan-out lookups cheap.',
+ 'Message fan-out runs through a pub/sub layer (Redis pub/sub or Kafka) so the send path does not block on delivery to thousands of connections. Search indexing and notifications are consumed off the same stream asynchronously.',
+ 'Partition messages and fan-out by channel_id; shard the connection gateways and route by subscription. Very large channels use a fan-out-on-read strategy for inactive members to avoid write amplification, fan-out-on-write for active ones.',
+ 'Fan-out-on-write gives instant delivery but explodes for huge channels; fan-out-on-read scales writes but adds read latency — a hybrid keyed on member activity balances them. Per-workspace sharding simplifies isolation but can create hot workspaces.',
+ 'If a gateway node dies, clients reconnect to another and replay missed messages from the cached/persisted history since their last_read cursor. The pub/sub layer is replicated so a broker loss does not drop in-flight fan-out.',
+ 'Could use a managed real-time platform (Pusher/Ably) for transport, or a log-centric design where Kafka topics per channel are the source of truth. XMPP is a heavier alternative protocol.',
+ 'Center the discussion on fan-out strategy (write vs read vs hybrid) and connection management at the gateway. Mention workspace isolation and the last_read cursor for catch-up.',
+ '["When do you choose fan-out-on-write vs fan-out-on-read?", "How do you manage millions of persistent WebSocket connections?", "How do you build message search across history?"]'),
+
+((SELECT id FROM tracks WHERE slug = 'backend-sde3'),
+ 'rate-limiter', 'Design a Distributed Rate Limiter', 'medium', 12,
+ 'Functional: limit requests per client/key to N per window across many API nodes, with clear allow/deny decisions and limit headers. Non-functional: very low added latency, accuracy under bursts, and correctness despite distribution across nodes.',
+ 'Assume thousands of API nodes and millions of distinct keys (per user, per IP, per endpoint). The limiter sits in the hot path of every request, so its own latency budget is sub-millisecond and it must add minimal overhead.',
+ 'Middleware checks allow(key) before handling a request and returns 429 with Retry-After + X-RateLimit-Remaining when over limit. Limits are configured per route/plan. The check reads and updates a shared counter store.',
+ 'A central store (Redis) holds per-key counters/tokens with TTLs: token-bucket (tokens, last_refill) or sliding-window (sorted set of timestamps). No durable SQL is needed — limiter state is ephemeral and reconstructable.',
+ 'API nodes call a shared counter store (Redis) using an atomic script (Lua) implementing token-bucket or sliding-window log/counter, so increment-and-check is a single round trip with no race. A local in-process cache absorbs the very hottest keys.',
+ 'The counter store is itself a cache (Redis) — there is no slower tier behind it. Hot keys are additionally cached in-process per node with short TTLs to cut round trips, accepting slight over-admission at the edges.',
+ 'No queue on the decision path — rate limiting must be synchronous. Configuration changes and limit-breach events are published asynchronously for observability and alerting.',
+ 'Shard the counter store by key; each shard handles a disjoint key space so it scales horizontally. Per-node local caches reduce central load. Sticky-by-key routing keeps a key''s counter on one shard.',
+ 'Token-bucket allows bursts up to bucket size and is memory-cheap; sliding-window-log is exact but stores every timestamp; fixed-window is cheapest but allows 2x bursts at boundaries. Local caching trades a little accuracy for big latency wins.',
+ 'If the central store is unreachable, fail open (allow) or fail closed (deny) per policy — most APIs fail open to preserve availability, accepting temporary over-admission. Replicate the store so a node loss does not reset all counters.',
+ 'Could use a sidecar/proxy (Envoy global rate limit) or an API-gateway-native limiter instead of in-app middleware. A gossip-based approximate counter avoids a central store entirely at the cost of precision.',
+ 'State the algorithm trade-offs (token-bucket vs sliding-window vs fixed-window) and how you make the increment atomic in a distributed setting (Lua/atomic op). Discuss fail-open vs fail-closed explicitly.',
+ '["Compare token-bucket, leaky-bucket, fixed-window, and sliding-window.", "How do you make the counter update atomic across nodes?", "Should the limiter fail open or fail closed, and why?"]')
+
+ON CONFLICT (slug) DO NOTHING;
+
+COMMIT;

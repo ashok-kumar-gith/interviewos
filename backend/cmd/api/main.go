@@ -214,18 +214,28 @@ func run() error {
 			Tokens: tokens,
 		}))
 
-		// Design Problems (HLD) catalog — read-only, public.
+		// Design Problems (HLD) catalog — public read; authenticated per-user
+		// progress (mark done + confidence) mirrors DSA/LLD problem tracking.
+		dpRepo := designproblems.NewRepository(db)
 		registrars = append(registrars,
-			designproblems.NewHandler(designproblems.NewService(designproblems.NewRepository(db))))
+			designproblems.NewHandlerWithAuth(
+				designproblems.NewServiceWithProgress(dpRepo, designproblems.NewProgressRepository(db)),
+				tokens,
+			))
 
 		// LLD problems catalog — read-only, public.
 		registrars = append(registrars,
 			lld.NewHandler(lld.NewService(lld.NewRepository(db))))
 
-		// Mock Interview module (user-scoped).
+		// Mock Interview module (user-scoped). On a finding with
+		// create_remediation_task, the remediation planner schedules a follow-up
+		// "revise" task on the user's next plan day (FR-MOCK-003).
 		registrars = append(registrars, mock.NewHandler(mock.HandlerConfig{
-			Service: mock.NewService(mock.ServiceConfig{Repo: mock.NewRepository(db)}),
-			Tokens:  tokens,
+			Service: mock.NewService(mock.ServiceConfig{
+				Repo:        mock.NewRepository(db),
+				Remediation: mockRemediation{planner: progress.NewRemediationPlanner(db)},
+			}),
+			Tokens: tokens,
 		}))
 
 		// Analytics module (readiness, snapshots, weak/strong topics, time-spent).
@@ -367,6 +377,21 @@ func (s snapshotter) RecordSnapshot(ctx context.Context, userID uuid.UUID) (prog
 		return progress.SnapshotStub{}, err
 	}
 	return progress.SnapshotStub{}, nil
+}
+
+// mockRemediation adapts progress.RemediationPlanner to mock.RemediationPlanner,
+// mapping the mock request shape to progress's input without a cross-module
+// import cycle (mock depends on the interface, not on progress).
+type mockRemediation struct{ planner *progress.RemediationPlanner }
+
+func (m mockRemediation) ScheduleRemediation(ctx context.Context, req mock.RemediationRequest) (uuid.UUID, error) {
+	return m.planner.Schedule(ctx, progress.RemediationInput{
+		UserID:     req.UserID,
+		PillarType: req.PillarType,
+		TopicID:    req.TopicID,
+		Title:      req.Title,
+		Detail:     req.Detail,
+	})
 }
 
 // buildTokenManager constructs the shared JWT token manager from configuration.

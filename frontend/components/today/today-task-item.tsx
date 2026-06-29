@@ -22,10 +22,12 @@ export interface TodayTaskItemProps {
   onComplete: (input: { confidence: ConfidenceLevel; timeSpentMinutes: number }) => void;
   onSkip: () => void;
   onReschedule: (toDate: string) => void;
+  onReopen?: () => void;
   onViewDetail: () => void;
   completing?: boolean;
   skipping?: boolean;
   rescheduling?: boolean;
+  reopening?: boolean;
 }
 
 export function TodayTaskItem({
@@ -33,10 +35,12 @@ export function TodayTaskItem({
   onComplete,
   onSkip,
   onReschedule,
+  onReopen,
   onViewDetail,
   completing = false,
   skipping = false,
   rescheduling = false,
+  reopening = false,
 }: TodayTaskItemProps) {
   const [expanded, setExpanded] = React.useState(false);
   const [confidence, setConfidence] = React.useState<number | undefined>(
@@ -140,9 +144,12 @@ export function TodayTaskItem({
             onViewDetail={onViewDetail}
             onReschedule={onReschedule}
             onSkip={onSkip}
+            onReopen={onReopen}
             rescheduling={rescheduling}
             skipping={skipping}
+            reopening={reopening}
             showSkip={!done && !skipped}
+            showReopen={(done || skipped) && !!onReopen}
           />
         </div>
       </div>

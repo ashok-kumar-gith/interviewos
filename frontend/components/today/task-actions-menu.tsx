@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CalendarClock, Eye, MoreHorizontal, SkipForward } from "lucide-react";
+import { CalendarClock, Eye, MoreHorizontal, RotateCcw, SkipForward } from "lucide-react";
 
 import { Popover } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,15 @@ export interface TaskActionsMenuProps {
   onReschedule: (toDate: string) => void;
   /** Skip the task. */
   onSkip: () => void;
+  /** Reopen a completed/skipped task back to pending. */
+  onReopen?: () => void;
   rescheduling?: boolean;
   skipping?: boolean;
+  reopening?: boolean;
   /** Hide the skip action (e.g. already terminal). */
   showSkip?: boolean;
+  /** Show the reopen action (only for resolved tasks). */
+  showReopen?: boolean;
   /** Accessible label for the trigger button. */
   triggerLabel?: string;
 }
@@ -38,9 +43,12 @@ export function TaskActionsMenu({
   onViewDetail,
   onReschedule,
   onSkip,
+  onReopen,
   rescheduling = false,
   skipping = false,
+  reopening = false,
   showSkip = true,
+  showReopen = false,
   triggerLabel = "Task actions",
 }: TaskActionsMenuProps) {
   const [open, setOpen] = React.useState(false);
@@ -125,6 +133,17 @@ export function TaskActionsMenu({
                 setOpen(false);
               }}
               disabled={skipping}
+            />
+          )}
+          {showReopen && onReopen && (
+            <MenuItem
+              icon={RotateCcw}
+              label="Reopen task"
+              onClick={() => {
+                onReopen();
+                setOpen(false);
+              }}
+              disabled={reopening}
             />
           )}
         </div>

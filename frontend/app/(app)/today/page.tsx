@@ -15,6 +15,7 @@ import { TaskDetailDialog } from "@/components/today/task-detail-dialog";
 import {
   completeTask,
   getToday,
+  reopenTask,
   rescheduleTask,
   skipTask,
   type PlanDay,
@@ -120,6 +121,28 @@ export default function TodayPage() {
     },
   });
 
+  const reopenMutation = useMutation({
+    mutationFn: ({ taskId }: { taskId: string }) => reopenTask(taskId),
+    onMutate: async ({ taskId }) => {
+      setActionError(null);
+      await queryClient.cancelQueries({ queryKey: TODAY_KEY });
+      const previous = queryClient.getQueryData<PlanDay>(TODAY_KEY);
+      queryClient.setQueryData<PlanDay>(TODAY_KEY, (old) =>
+        old ? patchTask(old, taskId, { status: "pending", confidence: null }) : old,
+      );
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(TODAY_KEY, ctx.previous);
+      setActionError("Couldn't reopen that task. Try again.");
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: TODAY_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      void queryClient.invalidateQueries({ queryKey: ["overdue"] });
+    },
+  });
+
   if (query.isLoading) return <TodaySkeleton />;
 
   const notFound = query.error instanceof ApiError && query.error.status === 404;
@@ -170,10 +193,12 @@ export default function TodayPage() {
             rescheduling={
               rescheduleMutation.isPending && rescheduleMutation.variables?.taskId === task.id
             }
+            reopening={reopenMutation.isPending && reopenMutation.variables?.taskId === task.id}
             onComplete={({ confidence, timeSpentMinutes }) =>
               completeMutation.mutate({ taskId: task.id, confidence, timeSpentMinutes })
             }
             onSkip={() => skipMutation.mutate({ taskId: task.id })}
+            onReopen={() => reopenMutation.mutate({ taskId: task.id })}
             onReschedule={(toDate) => rescheduleMutation.mutate({ taskId: task.id, toDate })}
             onViewDetail={() => setDetailTask(task)}
           />

@@ -15,9 +15,10 @@ type fakeRepo struct {
 	task   *PlanTaskRow
 	day    *PlanDayRow
 	aggs   []PillarAggregate
-	streak Streak
-	revDue int
-	dayErr error
+	streak     Streak
+	revDue     int
+	dayErr     error
+	hasRoadmap bool
 
 	completeCalled   bool
 	completeIn       CompleteInput
@@ -32,6 +33,9 @@ func (f *fakeRepo) GetPlanDay(_ context.Context, _ uuid.UUID, _ time.Time) (*Pla
 		return nil, f.dayErr
 	}
 	return f.day, nil
+}
+func (f *fakeRepo) HasActiveRoadmap(_ context.Context, _ uuid.UUID) (bool, error) {
+	return f.hasRoadmap, nil
 }
 func (f *fakeRepo) GetTask(_ context.Context, _, _ uuid.UUID) (*PlanTaskRow, error) {
 	if f.task == nil {
@@ -62,6 +66,16 @@ func (f *fakeRepo) RescheduleTask(_ context.Context, _, _ uuid.UUID, toDate time
 	f.rescheduleDate = toDate
 	t := *f.task
 	t.ID = uuid.New()
+	t.Status = "pending"
+	return &t, nil
+}
+func (f *fakeRepo) StartTask(_ context.Context, _, _ uuid.UUID, _ time.Time) (*PlanTaskRow, error) {
+	t := *f.task
+	t.Status = "in_progress"
+	return &t, nil
+}
+func (f *fakeRepo) ReopenTask(_ context.Context, _, _ uuid.UUID, _ time.Time) (*PlanTaskRow, error) {
+	t := *f.task
 	t.Status = "pending"
 	return &t, nil
 }

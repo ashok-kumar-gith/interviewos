@@ -393,6 +393,40 @@ paths:
               schema: { $ref: '#/components/schemas/PlanTask' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /tasks/{taskId}/start:
+    post:
+      tags: [Curriculum]
+      summary: Mark a task in progress
+      operationId: startTask
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanTask' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /tasks/{taskId}/reopen:
+    post:
+      tags: [Curriculum]
+      summary: Reopen a completed or skipped task (revert to pending)
+      description: >-
+        Reverts a completed or skipped task back to pending and undoes its
+        completion side effects (progress row, study session, and streak
+        counters). Idempotent for an already-pending task.
+      operationId: reopenTask
+      parameters:
+        - { name: taskId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PlanTask' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /tasks/{taskId}/reschedule:
     post:
       tags: [Curriculum]
@@ -632,6 +666,48 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DesignProblemDetail' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /design-problems/{designProblemId}/progress:
+    get:
+      tags: [SystemDesign]
+      summary: Get the caller's progress on a design problem
+      operationId: getDesignProblemProgress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: designProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: OK (status is "not_started" when none recorded)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignProblemProgress' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [SystemDesign]
+      summary: Record progress on a design problem (status + confidence)
+      operationId: saveDesignProblemProgress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: designProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [not_started, in_progress, completed, needs_review] }
+                confidence: { type: integer, minimum: 1, maximum: 5, nullable: true }
+                time_spent_minutes: { type: integer, minimum: 0 }
+                notes: { type: string, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignProblemProgress' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   # ---------------- BACKEND ENGINEERING ----------------
   /backend-engineering/topics:
@@ -1337,6 +1413,17 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
 
   schemas:
+    DesignProblemProgress:
+      type: object
+      properties:
+        design_problem_id: { type: string, format: uuid }
+        status: { type: string, enum: [not_started, in_progress, completed, needs_review] }
+        confidence: { type: integer, nullable: true }
+        attempts: { type: integer }
+        time_spent_minutes: { type: integer }
+        notes: { type: string, nullable: true }
+        first_completed_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
     # ---- Enums ----
     PillarType: { type: string, enum: [dsa, system_design, lld, backend_engineering, behavioral, resume] }
     ResourceType: { type: string, enum: [book, video, article, course, github, practice, documentation, blog, cheatsheet] }

@@ -53,17 +53,40 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return ErrValidation.Error() }
 func (e *ValidationError) Unwrap() error { return ErrValidation }
 
+// RemediationRequest is the input to scheduling a follow-up study task from a
+// mock finding. The planner places it on the user's next available plan day.
+type RemediationRequest struct {
+	UserID     uuid.UUID
+	PillarType string     // e.g. "dsa" (falls back to a generic study task when empty)
+	TopicID    *uuid.UUID // optional content item to study
+	Title      string
+	Detail     string
+}
+
+// RemediationPlanner schedules a remediation study task on the user's plan in
+// response to a mock weakness. It is an optional cross-module port (satisfied by
+// the progress/roadmap layer) and is nil-safe: when absent, findings are still
+// recorded, just without an auto-scheduled follow-up task. Returns the created
+// task id so it can be linked back to the finding.
+type RemediationPlanner interface {
+	ScheduleRemediation(ctx context.Context, req RemediationRequest) (uuid.UUID, error)
+}
+
 // Service implements the mock interview use-cases. It depends only on interfaces
 // so it is unit-testable with fakes.
 type Service struct {
-	repo     Repository
-	detector WeaknessDetector
+	repo      Repository
+	detector  WeaknessDetector
+	remediate RemediationPlanner
 }
 
 // ServiceConfig configures a Service.
 type ServiceConfig struct {
 	Repo     Repository
 	Detector WeaknessDetector
+	// Remediation is the optional planner used to schedule a follow-up study
+	// task when a finding sets create_remediation_task. nil disables scheduling.
+	Remediation RemediationPlanner
 }
 
 // NewService constructs a Service. If no WeaknessDetector is supplied it
@@ -74,7 +97,7 @@ func NewService(cfg ServiceConfig) *Service {
 	if det == nil {
 		det = NewDeterministicWeaknessDetector()
 	}
-	return &Service{repo: cfg.Repo, detector: det}
+	return &Service{repo: cfg.Repo, detector: det, remediate: cfg.Remediation}
 }
 
 const (
@@ -165,11 +188,33 @@ func (s *Service) AddFinding(ctx context.Context, userID, mockID uuid.UUID, in F
 		Category:        strings.TrimSpace(in.Category),
 		Detail:          strings.TrimSpace(in.Detail),
 	}
-	// create_remediation_task is accepted per the contract; wiring an actual
-	// plan_tasks row is deferred until the planning module exists. We leave
-	// RemediationTaskID nil for now.
 	if err := s.repo.AddFinding(ctx, f); err != nil {
 		return nil, err
+	}
+
+	// When requested, schedule a follow-up study task on the user's plan and link
+	// it back to the finding. Best-effort + nil-safe: a scheduling failure (or no
+	// planner / no active roadmap) must not fail the finding that already saved.
+	if in.CreateRemediationTask && s.remediate != nil {
+		pillar := ""
+		if in.PillarType != nil {
+			pillar = string(*in.PillarType)
+		}
+		title := strings.TrimSpace(in.Category)
+		if title == "" {
+			title = "Mock follow-up: review weakness"
+		}
+		taskID, rerr := s.remediate.ScheduleRemediation(ctx, RemediationRequest{
+			UserID:     userID,
+			PillarType: pillar,
+			TopicID:    in.TopicID,
+			Title:      "Remediate: " + title,
+			Detail:     f.Detail,
+		})
+		if rerr == nil && taskID != uuid.Nil {
+			f.RemediationTaskID = &taskID
+			_ = s.repo.UpdateFinding(ctx, f)
+		}
 	}
 	return f, nil
 }

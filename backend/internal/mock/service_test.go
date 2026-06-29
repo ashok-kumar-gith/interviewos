@@ -95,6 +95,12 @@ func (f *fakeRepo) AddFinding(_ context.Context, fi *Finding) error {
 	return nil
 }
 
+func (f *fakeRepo) UpdateFinding(_ context.Context, fi *Finding) error {
+	cp := *fi
+	f.findings[fi.ID] = &cp
+	return nil
+}
+
 func (f *fakeRepo) ListFindings(_ context.Context, userID uuid.UUID) ([]Finding, error) {
 	var out []Finding
 	for _, fi := range f.findings {

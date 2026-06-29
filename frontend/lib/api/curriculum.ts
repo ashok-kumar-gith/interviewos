@@ -159,6 +159,16 @@ export function completeTask(
   return api.post<CompleteTaskResponse>(`/tasks/${taskId}/complete`, body);
 }
 
+/** POST /tasks/{taskId}/start — mark a task in progress. */
+export function startTask(taskId: string): Promise<PlanTask> {
+  return api.post<PlanTask>(`/tasks/${taskId}/start`);
+}
+
+/** POST /tasks/{taskId}/reopen — revert a completed/skipped task to pending. */
+export function reopenTask(taskId: string): Promise<PlanTask> {
+  return api.post<PlanTask>(`/tasks/${taskId}/reopen`);
+}
+
 /** POST /tasks/{taskId}/skip — skip with optional reason. */
 export function skipTask(taskId: string, body: SkipTaskRequest = {}): Promise<PlanTask> {
   return api.post<PlanTask>(`/tasks/${taskId}/skip`, body);

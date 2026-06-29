@@ -28,6 +28,7 @@ import {
 } from "@/components/detail/detail-layout";
 import { getDesignProblem, type DesignProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
+import { DesignProblemProgressCard } from "@/components/detail/design-problem-progress";
 
 export default function DesignProblemDetailPage({
   params,
@@ -63,6 +64,8 @@ export default function DesignProblemDetailPage({
         <DifficultyPill difficulty={d.difficulty} />
         <h1 className="text-h1">{d.title}</h1>
       </header>
+
+      <DesignProblemProgressCard id={id} />
 
       <MarkdownSection title="Requirements" icon={ListChecks} content={d.requirements_md} />
       <MarkdownSection

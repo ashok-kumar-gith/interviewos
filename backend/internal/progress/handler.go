@@ -39,6 +39,8 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	{
 		authed.GET("/today", h.GetToday)
 		authed.POST("/tasks/:taskId/complete", h.CompleteTask)
+		authed.POST("/tasks/:taskId/start", h.StartTask)
+		authed.POST("/tasks/:taskId/reopen", h.ReopenTask)
 		authed.POST("/tasks/:taskId/skip", h.SkipTask)
 		authed.POST("/tasks/:taskId/reschedule", h.RescheduleTask)
 		authed.GET("/dashboard", h.GetDashboard)
@@ -192,6 +194,35 @@ func (h *Handler) SkipTask(c *gin.Context) {
 		}
 	}
 	task, err := h.svc.SkipTask(c.Request.Context(), uid, taskID, req.Reason)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toTaskResponse(task))
+}
+
+// StartTask handles POST /tasks/{taskId}/start — mark a task in progress.
+func (h *Handler) StartTask(c *gin.Context) {
+	uid, taskID, ok := h.authAndTask(c)
+	if !ok {
+		return
+	}
+	task, err := h.svc.StartTask(c.Request.Context(), uid, taskID)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toTaskResponse(task))
+}
+
+// ReopenTask handles POST /tasks/{taskId}/reopen — revert a completed/skipped
+// task back to pending, undoing its completion side effects.
+func (h *Handler) ReopenTask(c *gin.Context) {
+	uid, taskID, ok := h.authAndTask(c)
+	if !ok {
+		return
+	}
+	task, err := h.svc.ReopenTask(c.Request.Context(), uid, taskID)
 	if err != nil {
 		h.writeServiceError(c, err)
 		return

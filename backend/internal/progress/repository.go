@@ -62,6 +62,8 @@ type Repository interface {
 	// GetPlanDay returns the user's plan-day for a date (with tasks ordered by
 	// sort_order), or ErrPlanDayNotFound.
 	GetPlanDay(ctx context.Context, userID uuid.UUID, date time.Time) (*PlanDayRow, error)
+	// HasActiveRoadmap reports whether the user has a non-deleted active roadmap.
+	HasActiveRoadmap(ctx context.Context, userID uuid.UUID) (bool, error)
 	// GetTask returns a single task owned by the user, or ErrTaskNotFound.
 	GetTask(ctx context.Context, userID, taskID uuid.UUID) (*PlanTaskRow, error)
 
@@ -72,6 +74,11 @@ type Repository interface {
 	CompleteTask(ctx context.Context, userID, taskID uuid.UUID, in CompleteInput, now time.Time) (*PlanTaskRow, error)
 	// SkipTask flips a pending/in-progress task to skipped and returns it.
 	SkipTask(ctx context.Context, userID, taskID uuid.UUID, reason string, now time.Time) (*PlanTaskRow, error)
+	// StartTask flips a pending task to in_progress (a no-op signal of intent).
+	StartTask(ctx context.Context, userID, taskID uuid.UUID, now time.Time) (*PlanTaskRow, error)
+	// ReopenTask flips a completed/skipped task back to pending and reverses its
+	// completion side effects (progress row + streak counters) within a tx.
+	ReopenTask(ctx context.Context, userID, taskID uuid.UUID, now time.Time) (*PlanTaskRow, error)
 	// RescheduleTask moves a task to the user's plan-day for toDate. The original
 	// task is marked rescheduled; a fresh pending clone is created on the target
 	// day (rescheduled_from = original). Returns the new task.
@@ -126,6 +133,18 @@ func (r *gormRepository) GetPlanDay(ctx context.Context, userID uuid.UUID, date 
 	}
 	day.Tasks = tasks
 	return &day, nil
+}
+
+// HasActiveRoadmap reports whether the user has a non-deleted active roadmap.
+func (r *gormRepository) HasActiveRoadmap(ctx context.Context, userID uuid.UUID) (bool, error) {
+	var count int64
+	if err := r.db.WithContext(ctx).
+		Table("roadmaps").
+		Where("user_id = ? AND is_active AND deleted_at IS NULL", userID).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (r *gormRepository) tasksForDay(ctx context.Context, db *gorm.DB, dayID uuid.UUID) ([]PlanTaskRow, error) {
@@ -320,6 +339,106 @@ func (r *gormRepository) SkipTask(ctx context.Context, userID, taskID uuid.UUID,
 		if err := tx.Model(&PlanTaskRow{}).Where("id = ?", task.ID).Updates(updates).Error; err != nil {
 			return err
 		}
+		updated, err = getTaskTx(ctx, tx, userID, taskID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (r *gormRepository) StartTask(ctx context.Context, userID, taskID uuid.UUID, now time.Time) (*PlanTaskRow, error) {
+	var updated *PlanTaskRow
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, err := getTaskTx(ctx, tx, userID, taskID)
+		if err != nil {
+			return err
+		}
+		// Only a not-yet-resolved, not-already-started task can be started.
+		if task.Status == "completed" || task.Status == "skipped" {
+			return ErrTaskAlreadyResolved
+		}
+		if task.Status != "in_progress" {
+			if err := tx.Model(&PlanTaskRow{}).
+				Where("id = ?", task.ID).
+				Update("status", "in_progress").Error; err != nil {
+				return err
+			}
+		}
+		updated, err = getTaskTx(ctx, tx, userID, taskID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (r *gormRepository) ReopenTask(ctx context.Context, userID, taskID uuid.UUID, now time.Time) (*PlanTaskRow, error) {
+	var updated *PlanTaskRow
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task, err := getTaskTx(ctx, tx, userID, taskID)
+		if err != nil {
+			return err
+		}
+		// Only resolved tasks can be reopened; pending/in_progress is a no-op.
+		if task.Status != "completed" && task.Status != "skipped" {
+			updated, err = getTaskTx(ctx, tx, userID, taskID)
+			return err
+		}
+
+		wasCompleted := task.Status == "completed"
+		minutes := 0
+		if task.TimeSpentMinutes != nil {
+			minutes = *task.TimeSpentMinutes
+		}
+
+		// 1. Reset the task to pending and clear completion fields.
+		if err := tx.Model(&PlanTaskRow{}).Where("id = ?", task.ID).Updates(map[string]any{
+			"status":             "pending",
+			"confidence":         nil,
+			"time_spent_minutes": nil,
+			"completion_notes":   nil,
+			"completed_at":       nil,
+		}).Error; err != nil {
+			return err
+		}
+
+		// Reversing the streak/session/plan-day bookkeeping only applies when the
+		// task had been completed (skipped tasks recorded none of it).
+		if wasCompleted {
+			// 2. Soft-delete the study session(s) booked for this task.
+			if err := tx.Model(&StudySession{}).
+				Where("plan_task_id = ? AND deleted_at IS NULL", task.ID).
+				Update("deleted_at", now).Error; err != nil {
+				return err
+			}
+
+			// 3. Roll the plan-day completed_minutes back (never below zero).
+			if minutes > 0 {
+				if err := tx.Model(&PlanDayRow{}).
+					Where("id = ?", task.PlanDayID).
+					UpdateColumn("completed_minutes", gorm.Expr("GREATEST(completed_minutes - ?, 0)", minutes)).Error; err != nil {
+					return err
+				}
+			}
+
+			// 4. Decrement the streak day's counters; if it drops to zero tasks,
+			//    clear goal_met. (Streak length recomputes from streak_days on read.)
+			day := now.Format("2006-01-02")
+			if err := tx.Exec(`
+				UPDATE streak_days
+				   SET tasks_completed = GREATEST(tasks_completed - 1, 0),
+				       minutes_studied = GREATEST(minutes_studied - ?, 0),
+				       goal_met = (GREATEST(tasks_completed - 1, 0) > 0 AND goal_met),
+				       updated_at = ?
+				 WHERE user_id = ? AND date = ? AND deleted_at IS NULL`,
+				minutes, now, userID, day).Error; err != nil {
+				return err
+			}
+		}
+
 		updated, err = getTaskTx(ctx, tx, userID, taskID)
 		return err
 	})

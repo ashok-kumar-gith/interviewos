@@ -2,6 +2,7 @@ package progress
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -143,7 +144,28 @@ type CompleteParams struct {
 // user's profile timezone (FR-DASH-008), falling back to UTC — enriched with its
 // tasks. Returns ErrPlanDayNotFound when none exists.
 func (s *Service) GetToday(ctx context.Context, userID uuid.UUID) (*PlanDayRow, error) {
-	return s.repo.GetPlanDay(ctx, userID, s.todayFor(ctx, userID))
+	today := s.todayFor(ctx, userID)
+	day, err := s.repo.GetPlanDay(ctx, userID, today)
+	if errors.Is(err, ErrPlanDayNotFound) {
+		// No plan-day for today can mean a rest day, a date before the roadmap's
+		// start / after its end, or a timezone/day-boundary skew. As long as the
+		// user has an active roadmap, surface a graceful empty rest-day (200)
+		// rather than a hard 404 — 404 is reserved for "no roadmap at all", which
+		// the client treats as the onboarding/generate prompt.
+		hasRoadmap, herr := s.repo.HasActiveRoadmap(ctx, userID)
+		if herr != nil {
+			return nil, herr
+		}
+		if hasRoadmap {
+			return &PlanDayRow{
+				UserID:    userID,
+				Date:      today,
+				IsRestDay: true,
+				Tasks:     []PlanTaskRow{},
+			}, nil
+		}
+	}
+	return day, err
 }
 
 // CompleteTask validates the payload and transactionally completes the task,
@@ -206,6 +228,18 @@ func (s *Service) CompleteTask(ctx context.Context, userID, taskID uuid.UUID, p 
 // SkipTask marks a task skipped (with an optional reason).
 func (s *Service) SkipTask(ctx context.Context, userID, taskID uuid.UUID, reason string) (*PlanTaskRow, error) {
 	return s.repo.SkipTask(ctx, userID, taskID, reason, s.now().UTC())
+}
+
+// StartTask marks a pending task in_progress ("I'm working on this now").
+func (s *Service) StartTask(ctx context.Context, userID, taskID uuid.UUID) (*PlanTaskRow, error) {
+	return s.repo.StartTask(ctx, userID, taskID, s.now().UTC())
+}
+
+// ReopenTask reverts a completed/skipped task to pending, undoing its
+// completion side effects (progress/streak/session) so a mistaken completion
+// can be corrected. Idempotent for an already-pending task.
+func (s *Service) ReopenTask(ctx context.Context, userID, taskID uuid.UUID) (*PlanTaskRow, error) {
+	return s.repo.ReopenTask(ctx, userID, taskID, s.now().UTC())
 }
 
 // RescheduleTask moves a task to the plan-day for toDate.
