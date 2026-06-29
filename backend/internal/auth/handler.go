@@ -127,6 +127,9 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	}
 	// Convenience alias: GET /api/v1/me (protected) mirrors /auth/me.
 	v1.GET("/me", RequireAuth(h.tokens), h.Me)
+	// Personal-data export and account deletion (NFR-DATA-003).
+	v1.GET("/me/export", RequireAuth(h.tokens), h.ExportData)
+	v1.DELETE("/me", RequireAuth(h.tokens), h.DeleteAccount)
 }
 
 // Register handles POST /auth/register.
@@ -191,7 +194,7 @@ func (h *Handler) Logout(c *gin.Context) {
 			token = cookie
 		}
 	}
-	if err := h.svc.Logout(c.Request.Context(), token); err != nil {
+	if err := h.svc.Logout(c.Request.Context(), token, reqCtx(c)); err != nil {
 		h.writeServiceError(c, err)
 		return
 	}
@@ -205,7 +208,7 @@ func (h *Handler) ForgotPassword(c *gin.Context) {
 	if !h.bindJSON(c, &req) {
 		return
 	}
-	if err := h.svc.ForgotPassword(c.Request.Context(), req.Email); err != nil {
+	if err := h.svc.ForgotPassword(c.Request.Context(), req.Email, reqCtx(c)); err != nil {
 		h.writeServiceError(c, err)
 		return
 	}
@@ -218,7 +221,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 	if !h.bindJSON(c, &req) {
 		return
 	}
-	if err := h.svc.ResetPassword(c.Request.Context(), req.Token, req.Password); err != nil {
+	if err := h.svc.ResetPassword(c.Request.Context(), req.Token, req.Password, reqCtx(c)); err != nil {
 		h.writeServiceError(c, err)
 		return
 	}
@@ -238,6 +241,39 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, toUserResponse(u))
+}
+
+// ExportData handles GET /me/export: returns the authenticated user's personal
+// data bundle (profile + all user-owned rows) as JSON.
+func (h *Handler) ExportData(c *gin.Context) {
+	uid, ok := UserIDFromContext(c)
+	if !ok {
+		server.AbortError(c, http.StatusUnauthorized, server.CodeUnauthenticated, "authentication required", nil)
+		return
+	}
+	bundle, err := h.svc.ExportData(c.Request.Context(), uid, reqCtx(c))
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="interviewos-export.json"`)
+	c.JSON(http.StatusOK, bundle)
+}
+
+// DeleteAccount handles DELETE /me: soft-deletes the authenticated user's
+// account and user-owned data, revokes all refresh tokens (204).
+func (h *Handler) DeleteAccount(c *gin.Context) {
+	uid, ok := UserIDFromContext(c)
+	if !ok {
+		server.AbortError(c, http.StatusUnauthorized, server.CodeUnauthenticated, "authentication required", nil)
+		return
+	}
+	if err := h.svc.DeleteAccount(c.Request.Context(), uid, reqCtx(c)); err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	h.clearRefreshCookie(c)
+	c.Status(http.StatusNoContent)
 }
 
 // OAuthCallback handles GET /auth/oauth/:provider/callback.
@@ -297,6 +333,14 @@ func (h *Handler) writeServiceError(c *gin.Context, err error) {
 		server.AbortError(c, http.StatusUnauthorized, server.CodeRefreshTokenInvalid, "refresh token is invalid, expired, or revoked", nil)
 	case errors.Is(err, ErrResetInvalid):
 		server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "reset token is invalid, expired, or already used", nil)
+	case errors.Is(err, ErrPasswordTooCommon):
+		server.AbortError(c, http.StatusUnprocessableEntity, server.CodeValidationError, "validation failed",
+			[]server.FieldError{{Field: "Password", Message: "password is too common"}})
+	case errors.Is(err, ErrPasswordTooShort):
+		server.AbortError(c, http.StatusUnprocessableEntity, server.CodeValidationError, "validation failed",
+			[]server.FieldError{{Field: "Password", Message: "must be at least 8 characters"}})
+	case errors.Is(err, ErrDataUnavailable):
+		server.AbortError(c, http.StatusServiceUnavailable, server.CodeInternal, "data service unavailable", nil)
 	case errors.Is(err, ErrUserNotFound):
 		server.AbortError(c, http.StatusNotFound, server.CodeNotFound, "user not found", nil)
 	case errors.Is(err, ErrUnsupportedProvider):

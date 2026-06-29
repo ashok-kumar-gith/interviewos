@@ -41,6 +41,32 @@ func RequireAuth(tokens *TokenManager) gin.HandlerFunc {
 	}
 }
 
+// RateLimitUserKey returns a rate-limit key function (for
+// server.RateLimitWithKey) that buckets requests by authenticated user id when a
+// valid bearer access token is present, and otherwise returns "" so the limiter
+// falls back to the client IP. It is intentionally best-effort: an invalid /
+// missing token is NOT rejected here (RequireAuth does that per route) — it just
+// means the request is rate-limited by IP instead of user. This powers the
+// per-authenticated-user budget (NFR-SEC-004) at the /api/v1 group level, before
+// per-route RequireAuth runs.
+func RateLimitUserKey(tokens *TokenManager) func(c *gin.Context) string {
+	return func(c *gin.Context) string {
+		raw, ok := bearerToken(c)
+		if !ok {
+			return ""
+		}
+		claims, err := tokens.ParseAccessToken(raw)
+		if err != nil {
+			return ""
+		}
+		uid, err := UserIDFromClaims(claims)
+		if err != nil {
+			return ""
+		}
+		return "user:" + uid.String()
+	}
+}
+
 // RequireRole returns middleware enforcing that the principal has one of the
 // allowed roles. Must run after RequireAuth.
 func RequireRole(roles ...Role) gin.HandlerFunc {

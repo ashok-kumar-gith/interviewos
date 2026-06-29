@@ -21,4 +21,13 @@ var (
 	ErrOAuthNotConfigured = errors.New("auth: oauth provider not configured")
 	// ErrUnsupportedProvider indicates an unknown OAuth provider (400).
 	ErrUnsupportedProvider = errors.New("auth: unsupported oauth provider")
+	// ErrPasswordTooShort indicates the password is shorter than the minimum
+	// length (422 VALIDATION_ERROR).
+	ErrPasswordTooShort = errors.New("auth: password is too short")
+	// ErrPasswordTooCommon indicates the password is on the common-password
+	// denylist (422 VALIDATION_ERROR).
+	ErrPasswordTooCommon = errors.New("auth: password is too common")
+	// ErrDataUnavailable indicates the data export/delete repository is not wired
+	// (503). Should not occur in a fully composed process.
+	ErrDataUnavailable = errors.New("auth: data repository unavailable")
 )

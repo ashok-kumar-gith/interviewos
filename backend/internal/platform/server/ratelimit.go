@@ -23,6 +23,16 @@ type rateLimiter interface {
 // otherwise it falls back to a process-local in-memory limiter. A limit <= 0
 // disables the middleware (returns a no-op).
 func RateLimit(rdb *redis.Client, limit int, scope string) gin.HandlerFunc {
+	return RateLimitWithKey(rdb, limit, scope, nil)
+}
+
+// RateLimitWithKey is RateLimit with a pluggable key strategy: keyFn derives the
+// rate-limit bucket key from the request (e.g. authenticated user id, falling
+// back to client IP). When keyFn is nil (or returns ""), the client IP is used.
+// This lets a single fixed-window limiter back both the per-IP general budget
+// and the per-authenticated-user budget (NFR-SEC-004). A limit <= 0 disables the
+// middleware (returns a no-op).
+func RateLimitWithKey(rdb *redis.Client, limit int, scope string, keyFn func(*gin.Context) string) gin.HandlerFunc {
 	if limit <= 0 {
 		return func(c *gin.Context) { c.Next() }
 	}
@@ -36,7 +46,13 @@ func RateLimit(rdb *redis.Client, limit int, scope string) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		key := c.ClientIP()
+		key := ""
+		if keyFn != nil {
+			key = keyFn(c)
+		}
+		if key == "" {
+			key = "ip:" + c.ClientIP()
+		}
 		allowed, retryAfter := lim.Allow(c.Request.Context(), key)
 		if !allowed {
 			if retryAfter > 0 {

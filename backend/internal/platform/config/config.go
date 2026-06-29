@@ -53,7 +53,18 @@ type Config struct {
 	// AuthRateLimitPerMin is the stricter per-IP request budget per minute applied
 	// to sensitive auth endpoints (login/register/forgot-password). Default 10.
 	AuthRateLimitPerMin int
+	// UserRateLimitPerMin is the per-authenticated-user request budget per minute
+	// applied across the API (keyed by user id when present, else client IP).
+	// Default 120.
+	UserRateLimitPerMin int
+	// BcryptCost is the bcrypt work factor used when hashing new passwords. NFR-SEC
+	// mandates a minimum of 12; values below 12 are clamped up to 12. Default 12.
+	BcryptCost int
 }
+
+// MinBcryptCost is the floor enforced for password hashing (NFR-SEC). Lower
+// configured values are clamped up to this.
+const MinBcryptCost = 12
 
 // Environment helpers.
 
@@ -86,6 +97,8 @@ func Load() (*Config, error) {
 	v.SetDefault("METRICS_ENABLED", true)
 	v.SetDefault("RATE_LIMIT_PER_MIN", 60)
 	v.SetDefault("AUTH_RATE_LIMIT_PER_MIN", 10)
+	v.SetDefault("USER_RATE_LIMIT_PER_MIN", 120)
+	v.SetDefault("BCRYPT_COST", MinBcryptCost)
 
 	// Optional .env support for local dev. Missing file is not an error.
 	v.SetConfigName(".env")
@@ -118,6 +131,8 @@ func Load() (*Config, error) {
 		MetricsEnabled:      v.GetBool("METRICS_ENABLED"),
 		RateLimitPerMin:     v.GetInt("RATE_LIMIT_PER_MIN"),
 		AuthRateLimitPerMin: v.GetInt("AUTH_RATE_LIMIT_PER_MIN"),
+		UserRateLimitPerMin: v.GetInt("USER_RATE_LIMIT_PER_MIN"),
+		BcryptCost:          v.GetInt("BCRYPT_COST"),
 	}
 	if cfg.AIModel == "" {
 		cfg.AIModel = "claude-sonnet-4-6"
@@ -128,6 +143,14 @@ func Load() (*Config, error) {
 	}
 	if cfg.AuthRateLimitPerMin <= 0 {
 		cfg.AuthRateLimitPerMin = 10
+	}
+	if cfg.UserRateLimitPerMin <= 0 {
+		cfg.UserRateLimitPerMin = 120
+	}
+	// Enforce the NFR-SEC bcrypt floor: clamp any lower/unset value up to the
+	// minimum so new hashes are never produced with a weak work factor.
+	if cfg.BcryptCost < MinBcryptCost {
+		cfg.BcryptCost = MinBcryptCost
 	}
 
 	var err error

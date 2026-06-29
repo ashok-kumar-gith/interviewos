@@ -145,3 +145,46 @@ func TestRateLimit_PerIPIsolation(t *testing.T) {
 	// A different IP is unaffected.
 	require.Equal(t, http.StatusOK, hit("198.51.100.2"))
 }
+
+func TestRateLimitWithKey_PerUserTriggers429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const limit = 2
+	engine := gin.New()
+	engine.Use(RequestID())
+
+	// Bucket by the X-User header (stands in for the authenticated user id); a
+	// blank header falls back to client IP.
+	keyFn := func(c *gin.Context) string {
+		if u := c.GetHeader("X-User"); u != "" {
+			return "user:" + u
+		}
+		return ""
+	}
+	engine.GET("/api/v1/me", RateLimitWithKey(nil, limit, "user", keyFn), func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	hit := func(user, ip string) int {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+		req.RemoteAddr = ip + ":5555"
+		if user != "" {
+			req.Header.Set("X-User", user)
+		}
+		rec := httptest.NewRecorder()
+		engine.ServeHTTP(rec, req)
+		return rec.Code
+	}
+
+	// Same user from DIFFERENT IPs shares one budget and is throttled.
+	require.Equal(t, http.StatusOK, hit("alice", "10.0.0.1"))
+	require.Equal(t, http.StatusOK, hit("alice", "10.0.0.2"))
+	require.Equal(t, http.StatusTooManyRequests, hit("alice", "10.0.0.3"))
+
+	// A different user is unaffected (separate bucket).
+	require.Equal(t, http.StatusOK, hit("bob", "10.0.0.1"))
+
+	// Unauthenticated requests fall back to per-IP bucketing.
+	require.Equal(t, http.StatusOK, hit("", "203.0.113.50"))
+	require.Equal(t, http.StatusOK, hit("", "203.0.113.50"))
+	require.Equal(t, http.StatusTooManyRequests, hit("", "203.0.113.50"))
+}

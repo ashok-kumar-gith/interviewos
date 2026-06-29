@@ -201,6 +201,48 @@ paths:
               schema: { $ref: '#/components/schemas/User' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /me:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated user (alias of /auth/me)
+      operationId: me
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    delete:
+      tags: [Auth]
+      summary: Delete my account (soft delete)
+      description: >-
+        Soft-deletes the authenticated user's account and all of their
+        user-owned data (sets deleted_at), revokes every refresh token, and
+        writes a security audit entry. Idempotent.
+      operationId: deleteAccount
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me/export:
+    get:
+      tags: [Auth]
+      summary: Export my personal data
+      description: >-
+        Returns a JSON bundle of all data the authenticated user owns
+        (profile, roadmap, progress, stories, resume, mocks, notifications,
+        and more). The password hash is never included.
+      operationId: exportMyData
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DataExport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ---------------- PROFILE / INTAKE ----------------
   /profile:
     get:
@@ -1406,6 +1448,22 @@ components:
         last_login_at: { type: [string, 'null'], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    DataExport:
+      type: object
+      description: >-
+        A personal-data export bundle for the authenticated user (NFR-DATA-003).
+        `data` maps each user-owned table name to the list of that user's live
+        rows. The password hash is never included in `user`.
+      required: [exported_at, user, data]
+      properties:
+        exported_at: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/User' }
+        data:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: object, additionalProperties: true }
 
     # ---- Profile ----
     UserProfile:

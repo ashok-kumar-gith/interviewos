@@ -207,7 +207,7 @@ func TestRegister_Success(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestService(t, repo, &captureMailer{}, nil)
 
-	pair, err := svc.Register(context.Background(), "User@Example.com", "password123", "Test User", RequestContext{})
+	pair, err := svc.Register(context.Background(), "User@Example.com", "Str0ngPass!7", "Test User", RequestContext{})
 	require.NoError(t, err)
 	require.NotEmpty(t, pair.AccessToken)
 	require.NotEmpty(t, pair.RefreshToken)
@@ -222,10 +222,10 @@ func TestRegister_DuplicateEmail(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestService(t, repo, &captureMailer{}, nil)
 
-	_, err := svc.Register(context.Background(), "dup@example.com", "password123", "", RequestContext{})
+	_, err := svc.Register(context.Background(), "dup@example.com", "Str0ngPass!7", "", RequestContext{})
 	require.NoError(t, err)
 
-	_, err = svc.Register(context.Background(), "dup@example.com", "password123", "", RequestContext{})
+	_, err = svc.Register(context.Background(), "dup@example.com", "Str0ngPass!7", "", RequestContext{})
 	require.ErrorIs(t, err, ErrEmailTaken)
 }
 
@@ -249,10 +249,10 @@ func TestLogin_UnknownEmail(t *testing.T) {
 func TestLogin_SuccessSetsLastLogin(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestService(t, repo, &captureMailer{}, nil)
-	_, err := svc.Register(context.Background(), "a@example.com", "password123", "", RequestContext{})
+	_, err := svc.Register(context.Background(), "a@example.com", "Str0ngPass!7", "", RequestContext{})
 	require.NoError(t, err)
 
-	pair, err := svc.Login(context.Background(), "a@example.com", "password123", RequestContext{})
+	pair, err := svc.Login(context.Background(), "a@example.com", "Str0ngPass!7", RequestContext{})
 	require.NoError(t, err)
 	require.NotNil(t, pair.User.LastLoginAt)
 }
@@ -261,7 +261,7 @@ func TestRefresh_RotationAndReuseDetection(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestService(t, repo, &captureMailer{}, nil)
 
-	reg, err := svc.Register(context.Background(), "rot@example.com", "password123", "", RequestContext{})
+	reg, err := svc.Register(context.Background(), "rot@example.com", "Str0ngPass!7", "", RequestContext{})
 	require.NoError(t, err)
 	original := reg.RefreshToken
 
@@ -292,7 +292,7 @@ func TestRefresh_Expired(t *testing.T) {
 	current := base
 	svc := newTestService(t, repo, &captureMailer{}, func() time.Time { return current })
 
-	reg, err := svc.Register(context.Background(), "exp@example.com", "password123", "", RequestContext{})
+	reg, err := svc.Register(context.Background(), "exp@example.com", "Str0ngPass!7", "", RequestContext{})
 	require.NoError(t, err)
 
 	current = base.Add(721 * time.Hour) // past 720h refresh TTL
@@ -304,10 +304,10 @@ func TestLogout_RevokesFamily(t *testing.T) {
 	repo := newFakeRepo()
 	svc := newTestService(t, repo, &captureMailer{}, nil)
 
-	reg, err := svc.Register(context.Background(), "out@example.com", "password123", "", RequestContext{})
+	reg, err := svc.Register(context.Background(), "out@example.com", "Str0ngPass!7", "", RequestContext{})
 	require.NoError(t, err)
 
-	require.NoError(t, svc.Logout(context.Background(), reg.RefreshToken))
+	require.NoError(t, svc.Logout(context.Background(), reg.RefreshToken, RequestContext{}))
 
 	_, err = svc.Refresh(context.Background(), reg.RefreshToken, RequestContext{})
 	require.ErrorIs(t, err, ErrRefreshInvalid)
@@ -322,12 +322,12 @@ func TestForgotAndResetPasswordFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// Forgot always succeeds; mailer captures the token.
-	require.NoError(t, svc.ForgotPassword(context.Background(), "reset@example.com"))
+	require.NoError(t, svc.ForgotPassword(context.Background(), "reset@example.com", RequestContext{}))
 	require.NotEmpty(t, mailer.lastToken)
 	require.Contains(t, mailer.lastURL, mailer.lastToken)
 
 	// Reset with the captured token.
-	require.NoError(t, svc.ResetPassword(context.Background(), mailer.lastToken, "newpassword1"))
+	require.NoError(t, svc.ResetPassword(context.Background(), mailer.lastToken, "newpassword1", RequestContext{}))
 
 	// Old password fails; new password works.
 	_, err = svc.Login(context.Background(), "reset@example.com", "oldpassword", RequestContext{})
@@ -336,14 +336,14 @@ func TestForgotAndResetPasswordFlow(t *testing.T) {
 	require.NoError(t, err)
 
 	// The reset token is single-use.
-	require.ErrorIs(t, svc.ResetPassword(context.Background(), mailer.lastToken, "another12"), ErrResetInvalid)
+	require.ErrorIs(t, svc.ResetPassword(context.Background(), mailer.lastToken, "another12", RequestContext{}), ErrResetInvalid)
 }
 
 func TestForgotPassword_UnknownEmailSilent(t *testing.T) {
 	repo := newFakeRepo()
 	mailer := &captureMailer{}
 	svc := newTestService(t, repo, mailer, nil)
-	require.NoError(t, svc.ForgotPassword(context.Background(), "ghost@example.com"))
+	require.NoError(t, svc.ForgotPassword(context.Background(), "ghost@example.com", RequestContext{}))
 	require.Empty(t, mailer.lastToken)
 }
 
@@ -356,10 +356,10 @@ func TestResetPassword_Expired(t *testing.T) {
 
 	_, err := svc.Register(context.Background(), "exp2@example.com", "oldpassword", "", RequestContext{})
 	require.NoError(t, err)
-	require.NoError(t, svc.ForgotPassword(context.Background(), "exp2@example.com"))
+	require.NoError(t, svc.ForgotPassword(context.Background(), "exp2@example.com", RequestContext{}))
 
 	current = base.Add(2 * time.Hour) // past 1h reset TTL
-	require.ErrorIs(t, svc.ResetPassword(context.Background(), mailer.lastToken, "newpass12"), ErrResetInvalid)
+	require.ErrorIs(t, svc.ResetPassword(context.Background(), mailer.lastToken, "newpass12", RequestContext{}), ErrResetInvalid)
 }
 
 func TestResetPassword_RevokesRefreshTokens(t *testing.T) {
@@ -369,8 +369,8 @@ func TestResetPassword_RevokesRefreshTokens(t *testing.T) {
 
 	reg, err := svc.Register(context.Background(), "revoke@example.com", "oldpassword", "", RequestContext{})
 	require.NoError(t, err)
-	require.NoError(t, svc.ForgotPassword(context.Background(), "revoke@example.com"))
-	require.NoError(t, svc.ResetPassword(context.Background(), mailer.lastToken, "newpass123"))
+	require.NoError(t, svc.ForgotPassword(context.Background(), "revoke@example.com", RequestContext{}))
+	require.NoError(t, svc.ResetPassword(context.Background(), mailer.lastToken, "newpass123", RequestContext{}))
 
 	// Pre-existing refresh token is revoked by the reset.
 	_, err = svc.Refresh(context.Background(), reg.RefreshToken, RequestContext{})
@@ -392,9 +392,9 @@ func TestOAuthCallback_UnsupportedProvider(t *testing.T) {
 }
 
 func TestBcryptHashing(t *testing.T) {
-	hash, err := bcrypt.GenerateFromPassword([]byte("password123"), bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte("Str0ngPass!7"), minBcryptCost)
 	require.NoError(t, err)
-	require.NotEqual(t, "password123", string(hash))
-	require.NoError(t, bcrypt.CompareHashAndPassword(hash, []byte("password123")))
+	require.NotEqual(t, "Str0ngPass!7", string(hash))
+	require.NoError(t, bcrypt.CompareHashAndPassword(hash, []byte("Str0ngPass!7")))
 	require.Error(t, bcrypt.CompareHashAndPassword(hash, []byte("wrong")))
 }

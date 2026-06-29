@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -91,12 +92,22 @@ func run() error {
 
 	// 4. Compose feature modules (clean DI) and build the router.
 	var registrars []server.RouteRegistrar
+	var apiMiddleware []gin.HandlerFunc
 	if db != nil {
 		// Shared JWT token manager (used by auth + every protected module's
 		// RequireAuth middleware).
 		tokens, terr := buildTokenManager(cfg)
 		if terr != nil {
 			return terr
+		}
+
+		// API-wide rate limiting (NFR-SEC-004): a general per-IP budget plus a
+		// per-authenticated-user budget (keyed by user id from a valid bearer
+		// token, else client IP), across the whole /api/v1 group. Redis-backed
+		// with in-memory fallback. Auth endpoints keep their stricter per-IP limit.
+		apiMiddleware = []gin.HandlerFunc{
+			server.RateLimit(rdb, cfg.RateLimitPerMin, "general"),
+			server.RateLimitWithKey(rdb, cfg.UserRateLimitPerMin, "user", auth.RateLimitUserKey(tokens)),
 		}
 
 		registrars = append(registrars, buildAuthModule(cfg, log, db, rdb, tokens))
@@ -270,11 +281,12 @@ func run() error {
 	}
 
 	engine := server.New(server.Options{
-		Config:     cfg,
-		Logger:     log,
-		DB:         db,
-		Redis:      rdb,
-		Registrars: registrars,
+		Config:        cfg,
+		Logger:        log,
+		DB:            db,
+		Redis:         rdb,
+		Registrars:    registrars,
+		APIMiddleware: apiMiddleware,
 	})
 
 	srv := &http.Server{
@@ -380,11 +392,14 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redi
 		auth.NewUnconfiguredProvider(auth.ProviderGitHub),
 	)
 	svc := auth.NewService(auth.ServiceConfig{
-		Repo:   repo,
-		Tokens: tokens,
-		Mailer: mailer,
-		OAuth:  oauthReg,
-		Logger: log,
+		Repo:       repo,
+		Data:       auth.NewDataRepository(db),
+		Tokens:     tokens,
+		Mailer:     mailer,
+		OAuth:      oauthReg,
+		Audit:      auth.NewAuditLogger(db, log),
+		Logger:     log,
+		BcryptCost: cfg.BcryptCost,
 	})
 	// Stricter per-IP rate limit on credential-sensitive auth endpoints. Uses
 	// Redis when available (correct across replicas), in-memory otherwise.

@@ -24,6 +24,9 @@ type Options struct {
 	Redis  *redis.Client
 	// Registrars are feature modules that mount their routes onto /api/v1.
 	Registrars []RouteRegistrar
+	// APIMiddleware is applied to the whole /api/v1 group before any feature
+	// routes (e.g. general + per-user rate limiting). Order is preserved.
+	APIMiddleware []gin.HandlerFunc
 }
 
 // RouteRegistrar attaches a feature module's routes to the versioned /api/v1
@@ -83,8 +86,15 @@ func RegisterRoutes(engine *gin.Engine, opts Options, metrics *Metrics) {
 	// Interactive API docs backed by the embedded OpenAPI spec.
 	RegisterSwagger(engine)
 
-	// Versioned API group. Feature modules mount their routes here.
+	// Versioned API group. Feature modules mount their routes here. Group-level
+	// middleware (e.g. general + per-user rate limiting) runs before any feature
+	// route handler.
 	v1 := engine.Group("/api/v1")
+	for _, mw := range opts.APIMiddleware {
+		if mw != nil {
+			v1.Use(mw)
+		}
+	}
 	for _, r := range opts.Registrars {
 		if r != nil {
 			r.RegisterRoutes(v1)

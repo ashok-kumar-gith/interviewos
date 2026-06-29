@@ -30,25 +30,40 @@ type RequestContext struct {
 // Service implements the auth use-cases. It depends only on interfaces so it is
 // unit-testable with fakes.
 type Service struct {
-	repo     Repository
-	tokens   *TokenManager
-	mailer   Mailer
-	oauth    *OAuthRegistry
-	log      *zap.Logger
-	resetURL string // base URL for reset links, e.g. http://localhost:3000/reset-password
-	now      func() time.Time
+	repo       Repository
+	data       DataRepository
+	tokens     *TokenManager
+	mailer     Mailer
+	oauth      *OAuthRegistry
+	audit      AuditLogger
+	log        *zap.Logger
+	resetURL   string // base URL for reset links, e.g. http://localhost:3000/reset-password
+	bcryptCost int
+	now        func() time.Time
 }
 
 // ServiceConfig configures a Service.
 type ServiceConfig struct {
-	Repo     Repository
-	Tokens   *TokenManager
-	Mailer   Mailer
-	OAuth    *OAuthRegistry
+	Repo Repository
+	// Data is the cross-table reader/writer for account export and deletion.
+	// When nil, export/delete return ErrDataUnavailable.
+	Data   DataRepository
+	Tokens *TokenManager
+	Mailer Mailer
+	OAuth  *OAuthRegistry
+	// Audit records security-relevant events (best-effort). When nil a no-op
+	// logger is used so the service never needs nil checks.
+	Audit    AuditLogger
 	Logger   *zap.Logger
 	ResetURL string
-	Now      func() time.Time
+	// BcryptCost is the work factor for new password hashes. Values below the
+	// NFR-SEC floor (12) are clamped up; zero/unset defaults to the floor.
+	BcryptCost int
+	Now        func() time.Time
 }
+
+// minBcryptCost is the NFR-SEC floor for the password-hashing work factor.
+const minBcryptCost = 12
 
 // NewService constructs a Service.
 func NewService(cfg ServiceConfig) *Service {
@@ -60,25 +75,40 @@ func NewService(cfg ServiceConfig) *Service {
 	if resetURL == "" {
 		resetURL = "http://localhost:3000/reset-password"
 	}
+	audit := cfg.Audit
+	if audit == nil {
+		audit = NewNopAuditLogger()
+	}
+	cost := cfg.BcryptCost
+	if cost < minBcryptCost {
+		cost = minBcryptCost
+	}
+	log := cfg.Logger
+	if log == nil {
+		log = zap.NewNop()
+	}
 	return &Service{
-		repo:     cfg.Repo,
-		tokens:   cfg.Tokens,
-		mailer:   cfg.Mailer,
-		oauth:    cfg.OAuth,
-		log:      cfg.Logger,
-		resetURL: resetURL,
-		now:      nowFn,
+		repo:       cfg.Repo,
+		data:       cfg.Data,
+		tokens:     cfg.Tokens,
+		mailer:     cfg.Mailer,
+		oauth:      cfg.OAuth,
+		audit:      audit,
+		log:        log,
+		resetURL:   resetURL,
+		bcryptCost: cost,
+		now:        nowFn,
 	}
 }
-
-// bcryptCost is intentionally the library default (10) for a balance of
-// security and latency in local/dev; tune via deployment if needed.
-const bcryptCost = bcrypt.DefaultCost
 
 // Register creates a new email/password account and issues a token pair.
 // Duplicate (active) email returns ErrEmailTaken.
 func (s *Service) Register(ctx context.Context, email, password, fullName string, rc RequestContext) (*TokenPair, error) {
 	email = normalizeEmail(email)
+
+	if err := validatePassword(password); err != nil {
+		return nil, err
+	}
 
 	if _, err := s.repo.GetUserByEmail(ctx, email); err == nil {
 		return nil, ErrEmailTaken
@@ -86,7 +116,7 @@ func (s *Service) Register(ctx context.Context, email, password, fullName string
 		return nil, err
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), s.bcryptCost)
 	if err != nil {
 		return nil, fmt.Errorf("auth: hashing password: %w", err)
 	}
@@ -109,6 +139,14 @@ func (s *Service) Register(ctx context.Context, email, password, fullName string
 		return nil, fmt.Errorf("auth: creating user: %w", err)
 	}
 
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &u.ID,
+		Action:    ActionRegister,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+		Metadata:  map[string]any{"email": email},
+	})
+
 	return s.issueTokenPair(ctx, u, uuid.New(), rc)
 }
 
@@ -121,17 +159,21 @@ func (s *Service) Login(ctx context.Context, email, password string, rc RequestC
 		if errors.Is(err, ErrUserNotFound) {
 			// Run a dummy compare to keep timing roughly constant.
 			_ = bcrypt.CompareHashAndPassword([]byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv"), []byte(password))
+			s.recordLoginFailure(ctx, nil, email, "unknown_account", rc)
 			return nil, ErrInvalidCredentials
 		}
 		return nil, err
 	}
 	if u.PasswordHash == nil {
+		s.recordLoginFailure(ctx, &u.ID, email, "no_password", rc)
 		return nil, ErrInvalidCredentials
 	}
 	if u.Status != StatusActive {
+		s.recordLoginFailure(ctx, &u.ID, email, "inactive", rc)
 		return nil, ErrAccountInactive
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(*u.PasswordHash), []byte(password)); err != nil {
+		s.recordLoginFailure(ctx, &u.ID, email, "invalid_credentials", rc)
 		return nil, ErrInvalidCredentials
 	}
 
@@ -141,7 +183,28 @@ func (s *Service) Login(ctx context.Context, email, password string, rc RequestC
 	}
 	u.LastLoginAt = &now
 
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &u.ID,
+		Action:    ActionLoginSuccess,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+		Metadata:  map[string]any{"email": email},
+	})
+
 	return s.issueTokenPair(ctx, u, uuid.New(), rc)
+}
+
+// recordLoginFailure writes a best-effort login-failure audit row. userID may be
+// nil when the email maps to no account (no enumeration leak — the audit row is
+// internal, not returned to the caller).
+func (s *Service) recordLoginFailure(ctx context.Context, userID *uuid.UUID, email, reason string, rc RequestContext) {
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    userID,
+		Action:    ActionLoginFailure,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+		Metadata:  map[string]any{"email": email, "reason": reason},
+	})
 }
 
 // Refresh validates and ROTATES a refresh token: the presented token is revoked
@@ -168,6 +231,14 @@ func (s *Service) Refresh(ctx context.Context, rawToken string, rc RequestContex
 			zap.String("user_id", stored.UserID.String()),
 			zap.String("family_id", stored.FamilyID.String()),
 		)
+		uid := stored.UserID
+		s.audit.Record(ctx, AuditEvent{
+			UserID:    &uid,
+			Action:    ActionTokenReuseDetected,
+			IPAddress: rc.IPAddress,
+			UserAgent: rc.UserAgent,
+			Metadata:  map[string]any{"family_id": stored.FamilyID.String()},
+		})
 		return nil, ErrRefreshInvalid
 	}
 	if now.After(stored.ExpiresAt) {
@@ -198,7 +269,7 @@ func (s *Service) Refresh(ctx context.Context, rawToken string, rc RequestContex
 
 // Logout revokes the presented refresh token's family. Idempotent: an
 // unknown/invalid token returns nil so logout never leaks token validity.
-func (s *Service) Logout(ctx context.Context, rawToken string) error {
+func (s *Service) Logout(ctx context.Context, rawToken string, rc RequestContext) error {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return nil
@@ -210,13 +281,23 @@ func (s *Service) Logout(ctx context.Context, rawToken string) error {
 		}
 		return err
 	}
-	return s.repo.RevokeRefreshTokenFamily(ctx, stored.FamilyID, s.now())
+	if err := s.repo.RevokeRefreshTokenFamily(ctx, stored.FamilyID, s.now()); err != nil {
+		return err
+	}
+	uid := stored.UserID
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &uid,
+		Action:    ActionLogout,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+	})
+	return nil
 }
 
 // ForgotPassword always succeeds from the caller's perspective (no account
 // enumeration). When the email maps to an active account it creates a single-use
 // reset token and "sends" it via the mailer.
-func (s *Service) ForgotPassword(ctx context.Context, email string) error {
+func (s *Service) ForgotPassword(ctx context.Context, email string, rc RequestContext) error {
 	email = normalizeEmail(email)
 	u, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
@@ -248,15 +329,26 @@ func (s *Service) ForgotPassword(ctx context.Context, email string) error {
 		// Log but do not surface to the caller (still return 2xx).
 		s.log.Error("auth: sending reset email", zap.Error(err))
 	}
+
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &u.ID,
+		Action:    ActionPasswordResetReq,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+		Metadata:  map[string]any{"email": email},
+	})
 	return nil
 }
 
 // ResetPassword consumes a valid reset token, sets the new password, and revokes
 // all of the user's refresh tokens (force re-login everywhere).
-func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword string) error {
+func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword string, rc RequestContext) error {
 	rawToken = strings.TrimSpace(rawToken)
 	if rawToken == "" {
 		return ErrResetInvalid
+	}
+	if err := validatePassword(newPassword); err != nil {
+		return err
 	}
 	prt, err := s.repo.GetResetTokenByHash(ctx, HashToken(rawToken))
 	if err != nil {
@@ -267,7 +359,7 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 		return ErrResetInvalid
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), s.bcryptCost)
 	if err != nil {
 		return fmt.Errorf("auth: hashing password: %w", err)
 	}
@@ -280,12 +372,88 @@ func (s *Service) ResetPassword(ctx context.Context, rawToken, newPassword strin
 	if err := s.repo.RevokeAllUserRefreshTokens(ctx, prt.UserID, now); err != nil {
 		return fmt.Errorf("auth: revoking refresh tokens: %w", err)
 	}
+
+	uid := prt.UserID
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &uid,
+		Action:    ActionPasswordReset,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+	})
 	return nil
 }
 
 // Me returns the current user by id.
 func (s *Service) Me(ctx context.Context, userID uuid.UUID) (*User, error) {
 	return s.repo.GetUserByID(ctx, userID)
+}
+
+// ExportData assembles the user's personal-data bundle (NFR-DATA-003): the user
+// record plus every live row they own across the user-owned tables. The export
+// itself is recorded as an audit event (best-effort).
+func (s *Service) ExportData(ctx context.Context, userID uuid.UUID, rc RequestContext) (*DataExport, error) {
+	if s.data == nil {
+		return nil, ErrDataUnavailable
+	}
+	u, err := s.repo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	// Do not leak the password hash in the export bundle.
+	u.PasswordHash = nil
+
+	data, err := s.data.ExportUserData(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("auth: exporting user data: %w", err)
+	}
+
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &userID,
+		Action:    ActionDataExported,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+	})
+
+	return &DataExport{
+		ExportedAt: s.now().UTC().Format(time.RFC3339),
+		User:       u,
+		Data:       data,
+	}, nil
+}
+
+// DeleteAccount soft-deletes the user's account and all of their user-owned rows
+// (set deleted_at), revokes every refresh token (logout everywhere), and writes
+// an audit row (NFR-DATA-003). The operation is idempotent: deleting an already
+// soft-deleted user simply affects no further rows.
+func (s *Service) DeleteAccount(ctx context.Context, userID uuid.UUID, rc RequestContext) error {
+	if s.data == nil {
+		return ErrDataUnavailable
+	}
+	// Confirm the account exists (and isn't already gone) before mutating.
+	if _, err := s.repo.GetUserByID(ctx, userID); err != nil {
+		return err
+	}
+
+	now := s.now()
+	rows, err := s.data.SoftDeleteUserData(ctx, userID, now)
+	if err != nil {
+		return err
+	}
+	if err := s.data.SoftDeleteUser(ctx, userID, now); err != nil {
+		return fmt.Errorf("auth: soft-deleting user: %w", err)
+	}
+	if err := s.repo.RevokeAllUserRefreshTokens(ctx, userID, now); err != nil {
+		return fmt.Errorf("auth: revoking refresh tokens: %w", err)
+	}
+
+	s.audit.Record(ctx, AuditEvent{
+		UserID:    &userID,
+		Action:    ActionAccountDeleted,
+		IPAddress: rc.IPAddress,
+		UserAgent: rc.UserAgent,
+		Metadata:  map[string]any{"rows_soft_deleted": rows},
+	})
+	return nil
 }
 
 // OAuthCallback exchanges an authorization code and links/creates the account.
