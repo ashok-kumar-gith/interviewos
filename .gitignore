@@ -35,3 +35,6 @@ build/
 
 # Docker volumes (local)
 /infra/data/
+
+# Claude Code session/worktree metadata
+.claude/

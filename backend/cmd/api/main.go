@@ -19,6 +19,10 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/interviewos/backend/internal/auth"
+	"github.com/interviewos/backend/internal/behavioral"
+	"github.com/interviewos/backend/internal/content"
+	"github.com/interviewos/backend/internal/intake"
+	"github.com/interviewos/backend/internal/resume"
 	"github.com/interviewos/backend/internal/platform/config"
 	"github.com/interviewos/backend/internal/platform/database"
 	"github.com/interviewos/backend/internal/platform/logger"
@@ -76,13 +80,38 @@ func run() error {
 	// 4. Compose feature modules (clean DI) and build the router.
 	var registrars []server.RouteRegistrar
 	if db != nil {
-		authHandler, aerr := buildAuthModule(cfg, log, db)
-		if aerr != nil {
-			return aerr
+		// Shared JWT token manager (used by auth + every protected module's
+		// RequireAuth middleware).
+		tokens, terr := buildTokenManager(cfg)
+		if terr != nil {
+			return terr
 		}
-		registrars = append(registrars, authHandler)
+
+		registrars = append(registrars, buildAuthModule(cfg, log, db, tokens))
+
+		// Content / Curriculum browsing module (read-only).
+		registrars = append(registrars,
+			content.NewHandler(content.NewService(content.NewRepository(db))))
+
+		// Intake / profile module.
+		registrars = append(registrars, intake.NewHandler(intake.HandlerConfig{
+			Service: intake.NewService(intake.ServiceConfig{Repo: intake.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
+
+		// Behavioral (STAR stories) module.
+		registrars = append(registrars, behavioral.NewHandler(behavioral.HandlerConfig{
+			Service: behavioral.NewService(behavioral.ServiceConfig{Repo: behavioral.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
+
+		// Resume module.
+		registrars = append(registrars, resume.NewHandler(resume.HandlerConfig{
+			Service: resume.NewService(resume.ServiceConfig{Repo: resume.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
 	} else {
-		log.Warn("auth module not mounted: database unavailable")
+		log.Warn("feature modules not mounted: database unavailable")
 	}
 
 	engine := server.New(server.Options{
@@ -142,20 +171,20 @@ func run() error {
 	return nil
 }
 
-// buildAuthModule wires the auth repository, token manager, mailer, OAuth
-// registry, service, and HTTP handler from configuration and shared deps.
-func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB) (*auth.Handler, error) {
-	tokens, err := auth.NewTokenManager(auth.TokenManagerConfig{
+// buildTokenManager constructs the shared JWT token manager from configuration.
+func buildTokenManager(cfg *config.Config) (*auth.TokenManager, error) {
+	return auth.NewTokenManager(auth.TokenManagerConfig{
 		Secret:     cfg.JWTSecret,
 		AccessTTL:  cfg.AccessTokenTTL,
 		RefreshTTL: cfg.RefreshTokenTTL,
 		ResetTTL:   cfg.ResetTokenTTL,
 		Issuer:     "interviewos",
 	})
-	if err != nil {
-		return nil, err
-	}
+}
 
+// buildAuthModule wires the auth repository, mailer, OAuth registry, service,
+// and HTTP handler from configuration and the shared token manager.
+func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, tokens *auth.TokenManager) *auth.Handler {
 	repo := auth.NewRepository(db)
 	mailer := auth.NewLogMailer(log)
 	// No live OAuth credentials locally: register unconfigured providers so the
@@ -175,5 +204,5 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB) (*auth.Ha
 		Service:       svc,
 		Tokens:        tokens,
 		SecureCookies: cfg.IsProduction(),
-	}), nil
+	})
 }
