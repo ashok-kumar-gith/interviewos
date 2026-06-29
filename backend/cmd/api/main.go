@@ -26,6 +26,7 @@ import (
 	"github.com/interviewos/backend/internal/lld"
 	"github.com/interviewos/backend/internal/mock"
 	"github.com/interviewos/backend/internal/notification"
+	"github.com/interviewos/backend/internal/progress"
 	"github.com/interviewos/backend/internal/resume"
 	"github.com/interviewos/backend/internal/roadmap"
 	"github.com/interviewos/backend/internal/platform/config"
@@ -126,6 +127,14 @@ func run() error {
 				Content:  roadmap.NewContentReader(db),
 			}),
 			Tokens: tokens,
+		}))
+
+		// Progress / Today / Dashboard module. Owns task completion (transactional
+		// progress + session + streak upserts), the Today view, and the dashboard
+		// aggregate (readiness via the SRS multiplicative form, ADR D15).
+		registrars = append(registrars, progress.NewHandler(progress.HandlerConfig{
+			Service: progress.NewService(progress.ServiceConfig{Repo: progress.NewRepository(db)}),
+			Tokens:  tokens,
 		}))
 
 		// Design Problems (HLD) catalog — read-only, public.

@@ -1,6 +1,7 @@
 import {
   Binary,
   Boxes,
+  CalendarRange,
   FileText,
   LayoutDashboard,
   type LucideIcon,
@@ -30,11 +31,12 @@ export interface NavItem {
 export const PRIMARY_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/today", label: "Today", icon: Sparkles },
+  { href: "/roadmap", label: "Roadmap", icon: CalendarRange },
 ];
 
 /** Pillar nav — fixed order, fixed icons (DESIGN-SYSTEM §2.3 / §9). */
 export const PILLAR_NAV: NavItem[] = [
-  { href: "/dsa", label: "DSA", icon: Binary, pillar: "dsa" },
+  { href: "/problems", label: "DSA", icon: Binary, pillar: "dsa" },
   { href: "/system-design", label: "System Design", icon: Network, pillar: "system-design" },
   { href: "/lld", label: "LLD", icon: Boxes, pillar: "lld" },
   { href: "/backend-engineering", label: "Backend Eng", icon: Server, pillar: "backend" },

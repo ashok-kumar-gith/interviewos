@@ -173,9 +173,70 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
+/**
+ * Like {@link apiFetch} but preserves the pagination envelope ({ data, meta })
+ * for list endpoints. Returns `{ data, meta }` with `meta` defaulted when the
+ * backend omits it.
+ */
+export async function apiFetchList<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<{ data: T[]; meta: ApiMeta }> {
+  const { body, query, headers, ...rest } = options;
+
+  const finalHeaders = new Headers(headers);
+  finalHeaders.set("Accept", "application/json");
+
+  const token = accessTokenProvider();
+  if (token) finalHeaders.set("Authorization", `Bearer ${token}`);
+
+  let serializedBody: BodyInit | undefined;
+  if (body !== undefined) {
+    finalHeaders.set("Content-Type", "application/json");
+    serializedBody = JSON.stringify(body);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(buildUrl(path, query), {
+      ...rest,
+      headers: finalHeaders,
+      body: serializedBody,
+      credentials: "include",
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      "INTERNAL",
+      "Network request failed. Check your connection and retry.",
+    );
+  }
+
+  const text = await res.text();
+  const payload: unknown = text ? safeJsonParse(text) : undefined;
+
+  if (!res.ok) {
+    const envelope = payload as ApiErrorEnvelope | undefined;
+    const err = envelope?.error;
+    throw new ApiError(
+      res.status,
+      err?.code ?? "INTERNAL",
+      err?.message ?? res.statusText ?? "Request failed.",
+      err?.details,
+      err?.request_id,
+    );
+  }
+
+  const env = payload as ApiSuccessEnvelope<T[]> | undefined;
+  const data = env?.data ?? [];
+  return { data, meta: env?.meta ?? {} };
+}
+
 export const api = {
   get: <T>(path: string, options?: RequestOptions) =>
     apiFetch<T>(path, { ...options, method: "GET" }),
+  getList: <T>(path: string, options?: RequestOptions) =>
+    apiFetchList<T>(path, { ...options, method: "GET" }),
   post: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     apiFetch<T>(path, { ...options, method: "POST", body }),
   put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
