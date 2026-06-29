@@ -62,4 +62,28 @@ func TestSeedIsIdempotent(t *testing.T) {
 	if second.Companies != 10 {
 		t.Errorf("expected 10 companies, got %d", second.Companies)
 	}
+
+	// The Backend Engineering pillar must be seeded with a substantial topic set
+	// (>=20), and re-running must not change the count (idempotency at the row
+	// level for this pillar specifically).
+	beCount := func() int64 {
+		var n int64
+		if err := db.WithContext(ctx).Table("topics t").
+			Joins("JOIN pillars p ON p.id = t.pillar_id").
+			Where("p.type = ? AND t.deleted_at IS NULL", "backend_engineering").
+			Count(&n).Error; err != nil {
+			t.Fatalf("counting backend_engineering topics: %v", err)
+		}
+		return n
+	}
+	if got := beCount(); got < 20 {
+		t.Errorf("expected >=20 backend_engineering topics after seed, got %d", got)
+	}
+	before := beCount()
+	if _, err := s.Run(ctx); err != nil {
+		t.Fatalf("third seed run: %v", err)
+	}
+	if after := beCount(); after != before {
+		t.Errorf("backend_engineering topic count not idempotent: before=%d after=%d", before, after)
+	}
 }

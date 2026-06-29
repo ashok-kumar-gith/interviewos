@@ -21,6 +21,7 @@ import (
 	"github.com/interviewos/backend/internal/ai"
 	"github.com/interviewos/backend/internal/analytics"
 	"github.com/interviewos/backend/internal/auth"
+	"github.com/interviewos/backend/internal/backendeng"
 	"github.com/interviewos/backend/internal/behavioral"
 	"github.com/interviewos/backend/internal/company"
 	"github.com/interviewos/backend/internal/content"
@@ -99,9 +100,18 @@ func run() error {
 
 		registrars = append(registrars, buildAuthModule(cfg, log, db, rdb, tokens))
 
-		// Content / Curriculum browsing module (read-only).
+		// Content / Curriculum browsing module (read-only). The content repository
+		// is shared with the Backend Engineering module below (which reuses it
+		// rather than duplicating read logic).
+		contentRepo := content.NewRepository(db)
 		registrars = append(registrars,
-			content.NewHandler(content.NewService(content.NewRepository(db))))
+			content.NewHandler(content.NewService(contentRepo)))
+
+		// Backend Engineering depth catalog — read-only, public. Serves the
+		// dedicated /backend-engineering/topics path over the shared content repo,
+		// pinned to the backend_engineering pillar.
+		registrars = append(registrars,
+			backendeng.NewHandler(backendeng.NewService(contentRepo)))
 
 		// Intake / profile module.
 		registrars = append(registrars, intake.NewHandler(intake.HandlerConfig{

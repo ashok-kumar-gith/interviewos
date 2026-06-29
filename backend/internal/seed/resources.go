@@ -33,6 +33,16 @@ var globalResources = []resourceDef{
 	{"kafka-docs", "documentation", "Apache Kafka Documentation", "Apache", "https://kafka.apache.org/documentation/", "Apache", "Reference for message-queue and event-streaming concepts.", 120},
 	{"raft-paper", "article", "In Search of an Understandable Consensus Algorithm (Raft)", "Diego Ongaro, John Ousterhout", "https://raft.github.io/raft.pdf", "raft.github.io", "The Raft consensus paper, explaining leader election and log replication.", 90},
 	{"use-the-index-luke", "article", "Use The Index, Luke", "Markus Winand", "https://use-the-index-luke.com/", "use-the-index-luke.com", "A practical guide to SQL indexing and query performance.", 120},
+	// Backend Engineering depth resources (deduped by url).
+	{"the-go-programming-language", "book", "The Go Programming Language", "Alan Donovan, Brian Kernighan", "https://www.gopl.io/", "Addison-Wesley", "The definitive Go book covering goroutines, channels, the runtime, and idiomatic concurrency.", 1800},
+	{"systems-performance-gregg", "book", "Systems Performance", "Brendan Gregg", "https://www.brendangregg.com/systems-performance-2nd-edition-book.html", "Pearson", "The reference on performance methodology and profiling: CPU, memory, IO, and tools like perf, BPF, and flame graphs.", 2000},
+	{"postgres-mvcc-docs", "documentation", "PostgreSQL: Concurrency Control & MVCC", "PostgreSQL", "https://www.postgresql.org/docs/current/mvcc.html", "PostgreSQL", "Official docs on transaction isolation, MVCC visibility, and locking in Postgres.", 90},
+	{"raft-visualization", "article", "The Raft Consensus Visualization", "Diego Ongaro et al.", "https://raft.github.io/", "raft.github.io", "Interactive explanation of leader election and log replication in Raft.", 60},
+	{"kubernetes-docs-concepts", "documentation", "Kubernetes Concepts", "Kubernetes", "https://kubernetes.io/docs/concepts/", "Kubernetes", "Official reference for Pods, Deployments, Services, scheduling, and autoscaling.", 180},
+	{"docker-docs", "documentation", "Docker Documentation", "Docker", "https://docs.docker.com/get-started/", "Docker", "Official guide to images, layering, multi-stage builds, networking, and volumes.", 120},
+	{"high-performance-browser-networking", "book", "High Performance Browser Networking", "Ilya Grigorik", "https://hpbn.co/", "O'Reilly", "Free online book on TCP, TLS, HTTP/2, HTTP/3 and the performance characteristics of the network stack.", 900},
+	{"go-memory-model", "documentation", "The Go Memory Model", "Go Team", "https://go.dev/ref/mem", "go.dev", "The happens-before rules governing concurrent goroutine memory access.", 45},
+	{"nginx-admin-guide", "documentation", "NGINX Admin Guide", "F5/NGINX", "https://docs.nginx.com/nginx/admin-guide/", "NGINX", "Reverse proxy, load-balancing, upstreams, and TLS termination configuration.", 120},
 }
 
 // seedResources upserts global resources (dedup by url) and returns slug→id.
@@ -102,8 +112,39 @@ var sdTopicResources = []topicResourceLink{
 	{"api-design", []string{"system-design-primer"}},
 }
 
+// beTopicResources links Backend Engineering topics to resources (keyed by the
+// be-topic slug, without the "be-" prefix). Resources are reused where they
+// already exist (ddia, kafka-docs, redis-caching-docs, use-the-index-luke,
+// raft-paper, system-design-primer) and deduped by url at the DB layer.
+var beTopicResources = []topicResourceLink{
+	{"kafka-event-streaming", []string{"kafka-docs", "ddia"}},
+	{"redis-caching-patterns", []string{"redis-caching-docs", "ddia"}},
+	{"sql-query-optimization", []string{"use-the-index-luke", "postgres-mvcc-docs"}},
+	{"nosql-data-models", []string{"ddia", "system-design-primer"}},
+	{"transactions-isolation", []string{"ddia", "postgres-mvcc-docs"}},
+	{"mvcc", []string{"postgres-mvcc-docs", "ddia"}},
+	{"indexing-btree-lsm", []string{"ddia", "use-the-index-luke"}},
+	{"replication", []string{"ddia"}},
+	{"partitioning-sharding", []string{"ddia", "system-design-primer"}},
+	{"cap-pacelc", []string{"ddia", "system-design-primer"}},
+	{"consensus-raft-paxos", []string{"raft-paper", "raft-visualization", "ddia"}},
+	{"load-balancing-nginx", []string{"nginx-admin-guide", "system-design-primer"}},
+	{"cdn", []string{"system-design-primer"}},
+	{"docker-containers", []string{"docker-docs"}},
+	{"kubernetes", []string{"kubernetes-docs-concepts", "docker-docs"}},
+	{"networking-tcp-tls-http", []string{"high-performance-browser-networking"}},
+	{"linux-fundamentals", []string{"systems-performance-gregg"}},
+	{"concurrency-synchronization", []string{"the-go-programming-language", "go-memory-model"}},
+	{"memory-performance-profiling", []string{"systems-performance-gregg"}},
+	{"go-runtime", []string{"the-go-programming-language", "go-memory-model"}},
+	{"garbage-collection", []string{"the-go-programming-language"}},
+	{"api-design-idempotency", []string{"system-design-primer"}},
+	{"distributed-transactions-saga", []string{"ddia"}},
+	{"observability", []string{"systems-performance-gregg"}},
+}
+
 // seedTopicResources links topics to resources, deduped by (topic_id, resource_id).
-func (s *Seeder) seedTopicResources(tx *gorm.DB, dsaTopics, sdTopics map[string]uuid.UUID, resources map[string]content.Resource) error {
+func (s *Seeder) seedTopicResources(tx *gorm.DB, dsaTopics, sdTopics, beTopics map[string]uuid.UUID, resources map[string]content.Resource) error {
 	link := func(topicID uuid.UUID, resourceSlugs []string) error {
 		for i, rs := range resourceSlugs {
 			res, ok := resources[rs]
@@ -135,6 +176,13 @@ func (s *Seeder) seedTopicResources(tx *gorm.DB, dsaTopics, sdTopics map[string]
 	}
 	for _, l := range sdTopicResources {
 		if id, ok := sdTopics[l.topicSlug]; ok {
+			if err := link(id, l.resourceSlugs); err != nil {
+				return err
+			}
+		}
+	}
+	for _, l := range beTopicResources {
+		if id, ok := beTopics[l.topicSlug]; ok {
 			if err := link(id, l.resourceSlugs); err != nil {
 				return err
 			}

@@ -221,3 +221,54 @@ func TestGenerate_RestDaysHaveNoTasks(t *testing.T) {
 		}
 	}
 }
+
+// TestGenerate_IncludesBackendEngineeringTasks asserts the engine is
+// pillar-agnostic: a profile that includes the backend_engineering pillar (with
+// seeded topics) yields at least one backend_engineering study task. This guards
+// the curriculum integration of the Backend Engineering pillar.
+func TestGenerate_IncludesBackendEngineeringTasks(t *testing.T) {
+	start := time.Date(2026, 6, 29, 0, 0, 0, 0, time.UTC)
+	beT1, beT2 := tid(40), tid(41)
+	in := Input{
+		Profile: Profile{
+			HoursPerWeek: 12,
+			StartDate:    start,
+			TargetWeeks:  8,
+			ActiveDays:   6,
+			// Weak backend_engineering self-assessment => the allocator should give
+			// it a healthy share of hours.
+			PillarStrengths: map[PillarType]int{
+				PillarDSA:        4,
+				PillarBackendEng: 2,
+			},
+		},
+		Pillars: []PillarMeta{
+			{Type: PillarDSA, Weight: 1.5},
+			{Type: PillarBackendEng, Weight: 1.0},
+		},
+		Topics: []Topic{
+			{ID: tid(1), Pillar: PillarDSA, Slug: "arrays", Name: "Arrays", Difficulty: DifficultyEasy, Priority: PriorityHigh, EstimatedHours: 4, SortOrder: 0},
+			{ID: beT1, Pillar: PillarBackendEng, Slug: "be-mvcc", Name: "MVCC", Difficulty: DifficultyHard, Priority: PriorityHigh, EstimatedHours: 3, SortOrder: 0},
+			{ID: beT2, Pillar: PillarBackendEng, Slug: "be-kafka", Name: "Kafka", Difficulty: DifficultyMedium, Priority: PriorityHigh, EstimatedHours: 4, SortOrder: 1},
+		},
+		CompanyMul: map[PillarType]float64{},
+	}
+
+	p := Generate(in)
+	var beStudy int
+	beTopicIDs := map[uuid.UUID]bool{beT1: true, beT2: true}
+	for _, w := range p.Weeks {
+		for _, d := range w.Days {
+			for _, tk := range d.Tasks {
+				if tk.Pillar == PillarBackendEng {
+					if tk.Kind == KindStudy && tk.ItemType == ItemTopic && beTopicIDs[tk.ItemID] {
+						beStudy++
+					}
+				}
+			}
+		}
+	}
+	if beStudy == 0 {
+		t.Fatal("expected >=1 backend_engineering study task in the generated plan, got 0")
+	}
+}

@@ -64,11 +64,15 @@ func (s *Seeder) Run(ctx context.Context) (Counts, error) {
 		if err != nil {
 			return fmt.Errorf("seed system design topics: %w", err)
 		}
+		beTopics, err := s.seedBackendEngineeringTopics(tx, track.ID, pillars[content.PillarBackendEng])
+		if err != nil {
+			return fmt.Errorf("seed backend engineering topics: %w", err)
+		}
 		resourcesBySlug, err := s.seedResources(tx)
 		if err != nil {
 			return fmt.Errorf("seed resources: %w", err)
 		}
-		if err := s.seedTopicResources(tx, dsaTopics, sdTopics, resourcesBySlug); err != nil {
+		if err := s.seedTopicResources(tx, dsaTopics, sdTopics, beTopics, resourcesBySlug); err != nil {
 			return fmt.Errorf("seed topic resources: %w", err)
 		}
 		if err := s.seedProblems(tx, track.ID, patterns, dsaTopics); err != nil {
