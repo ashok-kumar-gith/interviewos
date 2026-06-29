@@ -884,6 +884,18 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /mock-interviews/weaknesses:
+    get:
+      tags: [Mock]
+      summary: My ranked weakness summary (deterministic, aggregated from mock findings)
+      description: >
+        Aggregates the authenticated user's mock findings by category and
+        severity into a deterministically-ranked weakness summary. Backed by an
+        interface so a future AI detector can replace the deterministic one.
+      operationId: getMockWeaknesses
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/MockWeaknessSummary' } } } }
+
   # ---------------- REVISION ----------------
   /revision/due:
     get:
@@ -1950,6 +1962,25 @@ components:
         category: { type: string }
         detail: { type: string }
         create_remediation_task: { type: boolean, default: false }
+    MockWeaknessItem:
+      type: object
+      required: [area, count, score, max_severity, severity_counts]
+      properties:
+        area: { type: string }
+        pillar: { oneOf: [ { $ref: '#/components/schemas/PillarType' }, { type: 'null' } ] }
+        count: { type: integer }
+        score: { type: integer, description: severity-weighted aggregate (higher = weaker) }
+        max_severity: { $ref: '#/components/schemas/FindingSeverity' }
+        severity_counts:
+          type: object
+          additionalProperties: { type: integer }
+    MockWeaknessSummary:
+      type: object
+      required: [items, total_findings, generated_by]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/MockWeaknessItem' } }
+        total_findings: { type: integer }
+        generated_by: { type: string, description: detector implementation, e.g. "deterministic" }
 
     # ---- Analytics ----
     DashboardResponse:

@@ -21,8 +21,13 @@ import (
 	"github.com/interviewos/backend/internal/auth"
 	"github.com/interviewos/backend/internal/behavioral"
 	"github.com/interviewos/backend/internal/content"
+	"github.com/interviewos/backend/internal/designproblems"
 	"github.com/interviewos/backend/internal/intake"
+	"github.com/interviewos/backend/internal/lld"
+	"github.com/interviewos/backend/internal/mock"
+	"github.com/interviewos/backend/internal/notification"
 	"github.com/interviewos/backend/internal/resume"
+	"github.com/interviewos/backend/internal/roadmap"
 	"github.com/interviewos/backend/internal/platform/config"
 	"github.com/interviewos/backend/internal/platform/database"
 	"github.com/interviewos/backend/internal/platform/logger"
@@ -108,6 +113,38 @@ func run() error {
 		// Resume module.
 		registrars = append(registrars, resume.NewHandler(resume.HandlerConfig{
 			Service: resume.NewService(resume.ServiceConfig{Repo: resume.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
+
+		// Roadmap / Curriculum Engine module. The deterministic curriculum engine
+		// (internal/curriculum) is composed here behind the roadmap service via the
+		// ProfileReader + ContentReader read ports.
+		registrars = append(registrars, roadmap.NewHandler(roadmap.HandlerConfig{
+			Service: roadmap.NewService(roadmap.ServiceConfig{
+				Repo:     roadmap.NewRepository(db),
+				Profiles: roadmap.NewProfileReader(db),
+				Content:  roadmap.NewContentReader(db),
+			}),
+			Tokens: tokens,
+		}))
+
+		// Design Problems (HLD) catalog — read-only, public.
+		registrars = append(registrars,
+			designproblems.NewHandler(designproblems.NewService(designproblems.NewRepository(db))))
+
+		// LLD problems catalog — read-only, public.
+		registrars = append(registrars,
+			lld.NewHandler(lld.NewService(lld.NewRepository(db))))
+
+		// Mock Interview module (user-scoped).
+		registrars = append(registrars, mock.NewHandler(mock.HandlerConfig{
+			Service: mock.NewService(mock.ServiceConfig{Repo: mock.NewRepository(db)}),
+			Tokens:  tokens,
+		}))
+
+		// Notifications module (user-scoped, in-app channel).
+		registrars = append(registrars, notification.NewHandler(notification.HandlerConfig{
+			Service: notification.NewService(notification.ServiceConfig{Repo: notification.NewRepository(db)}),
 			Tokens:  tokens,
 		}))
 	} else {
