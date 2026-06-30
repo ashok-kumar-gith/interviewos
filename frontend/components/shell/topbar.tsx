@@ -1,9 +1,10 @@
 "use client";
 
-import { Command, Flame, Moon, PanelLeft, Search, Sun } from "lucide-react";
+import { Command, Moon, PanelLeft, Search, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/shell/notification-bell";
 import { ProfileMenu } from "@/components/shell/profile-menu";
+import { StreakChip } from "@/components/shell/streak-chip";
 import { useUiStore } from "@/lib/store/ui";
 import { useCommandStore } from "@/lib/store/command";
 
@@ -44,14 +45,8 @@ export function Topbar() {
         </button>
       </div>
 
-      {/* Streak chip (placeholder) */}
-      <span
-        className="flex items-center gap-1.5 rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium tabular-nums"
-        aria-label="12 day streak"
-      >
-        <Flame className="size-3.5 text-warning" aria-hidden />
-        12d
-      </span>
+      {/* Real current study streak (hidden when 0 / logged out). */}
+      <StreakChip />
 
       <NotificationBell />
 
