@@ -1,7 +1,8 @@
 "use client";
 
-import { buttonVariants } from "@/components/ui/button";
-import { oauthStartUrl } from "@/lib/api/auth";
+import * as React from "react";
+import { Button } from "@/components/ui/button";
+import { oauthStartUrl, type OAuthProvider } from "@/lib/api/auth";
 import { cn } from "@/lib/utils";
 
 /** Inline brand glyphs (lucide has no brand marks; keep self-contained SVGs). */
@@ -37,18 +38,67 @@ function GitHubIcon() {
 }
 
 export function OAuthButtons({ className }: { className?: string }) {
+  const [busy, setBusy] = React.useState<OAuthProvider | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
+
+  // Probe the provider's /start endpoint instead of hard-navigating to it. A
+  // configured provider responds with a redirect (302) to its auth page, which
+  // we follow. An unconfigured one (the local default) responds 501, so we show
+  // a friendly inline message instead of dumping the user on a raw error page.
+  async function start(provider: OAuthProvider, label: string) {
+    setNotice(null);
+    setBusy(provider);
+    try {
+      const res = await fetch(oauthStartUrl(provider), {
+        method: "GET",
+        redirect: "manual",
+        credentials: "include",
+      });
+      // Opaque redirect (type "opaqueredirect") or a 3xx means it's configured —
+      // hand off to a full navigation so the browser follows the provider flow.
+      if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400)) {
+        window.location.href = oauthStartUrl(provider);
+        return;
+      }
+      if (res.status === 501) {
+        setNotice(`${label} sign-in isn't set up yet — use email below to continue.`);
+        return;
+      }
+      setNotice(`Couldn't start ${label} sign-in. Use email below to continue.`);
+    } catch {
+      setNotice(`Couldn't reach the server for ${label} sign-in. Use email below.`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
-    <div className={className}>
+    <div className={cn("space-y-3", className)}>
       <div className="grid grid-cols-2 gap-3">
-        <a href={oauthStartUrl("google")} className={cn(buttonVariants({ variant: "outline" }))}>
-          <GoogleIcon />
+        <Button
+          type="button"
+          variant="outline"
+          loading={busy === "google"}
+          onClick={() => start("google", "Google")}
+        >
+          {busy !== "google" && <GoogleIcon />}
           Google
-        </a>
-        <a href={oauthStartUrl("github")} className={cn(buttonVariants({ variant: "outline" }))}>
-          <GitHubIcon />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          loading={busy === "github"}
+          onClick={() => start("github", "GitHub")}
+        >
+          {busy !== "github" && <GitHubIcon />}
           GitHub
-        </a>
+        </Button>
       </div>
+      {notice && (
+        <p role="status" className="text-center text-xs text-muted-foreground">
+          {notice}
+        </p>
+      )}
     </div>
   );
 }

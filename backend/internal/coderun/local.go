@@ -41,7 +41,9 @@ func (l *LocalExecutor) Execute(ctx context.Context, in RunInput) (RunOutput, er
 
 	out := RunOutput{Language: in.Language, Version: "local"}
 
-	switch in.Language {
+	// The service passes the resolved Piston runtime name (e.g. "c++", "node");
+	// normalize back to our canonical keys so the switch handles either form.
+	switch normalizeLang(in.Language) {
 	case "python":
 		return l.interpret(ctx, dir, in, out, "python3", "main.py", []string{"main.py"})
 	case "javascript":
@@ -202,6 +204,25 @@ func runCmd(ctx context.Context, dir, stdin string, env []string, name string, a
 		}
 	}
 	return truncate(so.String()), truncate(se.String()), exitCode, nil
+}
+
+// normalizeLang maps both the public language id and the Piston runtime name to
+// the canonical key used by Execute's switch (e.g. "c++"→"cpp", "node"→"javascript").
+func normalizeLang(lang string) string {
+	switch strings.ToLower(strings.TrimSpace(lang)) {
+	case "c++", "cpp", "g++":
+		return "cpp"
+	case "node", "nodejs", "javascript", "js":
+		return "javascript"
+	case "ts", "typescript":
+		return "typescript"
+	case "py", "python", "python3":
+		return "python"
+	case "golang", "go":
+		return "go"
+	default:
+		return strings.ToLower(strings.TrimSpace(lang))
+	}
 }
 
 // truncate caps captured output so a runaway program can't return megabytes.

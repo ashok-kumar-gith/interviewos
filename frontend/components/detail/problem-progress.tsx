@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { SegmentedRating } from "@/components/ui/segmented-rating";
+import { CodeEditor, type EditorLanguage } from "@/components/code/code-editor";
 import {
   deleteProblemProgress,
   getProblemProgress,
@@ -144,13 +145,13 @@ export function ProblemProgressPanel({ problemId }: { problemId: string }) {
             ))}
           </select>
         </div>
-        <Textarea
+        <CodeEditor
+          language={language as EditorLanguage}
           value={code}
-          onChange={(e) => setCode(e.target.value)}
+          onChange={setCode}
           rows={10}
-          spellCheck={false}
+          aria-label="Your solution code"
           placeholder="// Paste or write your solution here"
-          className="font-mono text-[13px] leading-relaxed"
         />
       </div>
 

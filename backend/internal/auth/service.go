@@ -456,6 +456,27 @@ func (s *Service) DeleteAccount(ctx context.Context, userID uuid.UUID, rc Reques
 	return nil
 }
 
+// OAuthStart resolves the provider and returns the URL the browser should be
+// redirected to in order to begin the authorization-code flow. With no
+// configured credentials it returns ErrOAuthNotConfigured (→ 501) so the
+// frontend can show a clear "not available" message instead of a raw 404.
+func (s *Service) OAuthStart(providerName string) (string, error) {
+	provider, err := s.oauth.Get(Provider(providerName))
+	if err != nil {
+		return "", err
+	}
+	if !provider.Configured() {
+		return "", ErrOAuthNotConfigured
+	}
+	// A configured provider would expose its authorization URL here. Real
+	// Google/GitHub providers implementing OAuthProvider supply it; until one is
+	// registered, Configured() is false and we never reach this branch.
+	if au, ok := provider.(interface{ AuthURL() string }); ok {
+		return au.AuthURL(), nil
+	}
+	return "", ErrOAuthNotConfigured
+}
+
 // OAuthCallback exchanges an authorization code and links/creates the account.
 // With no configured credentials it returns ErrOAuthNotConfigured (→ 501).
 func (s *Service) OAuthCallback(ctx context.Context, providerName, code, state string, rc RequestContext) (*TokenPair, error) {

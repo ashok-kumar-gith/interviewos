@@ -47,7 +47,14 @@ export function deleteProblemProgress(id: string): Promise<void> {
   return api.delete<void>(`/problems/${id}/progress`);
 }
 
-/** GET /problems/solved — the user's solved/attempted log. */
-export function listSolvedProblems(): Promise<ProblemProgress[]> {
-  return api.get<{ data: ProblemProgress[] }>("/problems/solved").then((r) => r.data ?? []);
+/**
+ * GET /problems/solved — the user's full progress log (solved AND attempted).
+ * The client auto-unwraps the { data } envelope, so this resolves to the array
+ * directly.
+ */
+export function listProblemProgress(): Promise<ProblemProgress[]> {
+  return api.get<ProblemProgress[]>("/problems/solved").then((r) => r ?? []);
 }
+
+/** @deprecated alias kept for existing imports. */
+export const listSolvedProblems = listProblemProgress;

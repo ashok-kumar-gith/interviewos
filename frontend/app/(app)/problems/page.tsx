@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ExternalLink, RefreshCw, Search } from "lucide-react";
+import { CheckCircle2, Circle, CircleDashed, ExternalLink, RefreshCw, Search } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
@@ -29,6 +29,7 @@ import {
   type Problem,
 } from "@/lib/api/content";
 import type { Difficulty } from "@/lib/api/types";
+import { listProblemProgress } from "@/lib/api/dsaprogress";
 
 const PAGE_SIZE = 20;
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
@@ -40,6 +41,7 @@ export default function ProblemsPage() {
   const [difficulty, setDifficulty] = React.useState<Difficulty | "">("");
   const [patternId, setPatternId] = React.useState("");
   const [companyId, setCompanyId] = React.useState("");
+  const [status, setStatus] = React.useState<"" | "solved" | "attempted" | "unsolved">("");
 
   // Debounce free-text search and reset to page 1 on any filter change.
   React.useEffect(() => {
@@ -59,6 +61,32 @@ export default function ProblemsPage() {
     queryFn: () => listCompanies(),
   });
 
+  // Per-problem progress, to badge rows and filter by status. Best-effort: if it
+  // fails (e.g. not logged in) every problem reads as "unsolved" and no badges
+  // show. A problem is SOLVED when its row has solved=true; ATTEMPTED when a row
+  // exists but isn't solved (opened/worked-on, e.g. saved code or in_progress);
+  // UNSOLVED when there is no row at all.
+  const progressQuery = useQuery({
+    queryKey: ["problems-solved"],
+    queryFn: listProblemProgress,
+    refetchOnMount: "always",
+  });
+  const { solvedIds, attemptedIds } = React.useMemo(() => {
+    const solved = new Set<string>();
+    const attempted = new Set<string>();
+    for (const p of progressQuery.data ?? []) {
+      if (p.solved) solved.add(p.problem_id);
+      else attempted.add(p.problem_id);
+    }
+    return { solvedIds: solved, attemptedIds: attempted };
+  }, [progressQuery.data]);
+
+  function statusOf(id: string): "solved" | "attempted" | "unsolved" {
+    if (solvedIds.has(id)) return "solved";
+    if (attemptedIds.has(id)) return "attempted";
+    return "unsolved";
+  }
+
   const query = useQuery<ListResult<Problem>, unknown>({
     queryKey: ["problems", { page, q, difficulty, patternId, companyId }],
     queryFn: () =>
@@ -73,7 +101,10 @@ export default function ProblemsPage() {
     placeholderData: keepPreviousData,
   });
 
-  const problems = query.data?.data ?? [];
+  const allProblems = query.data?.data ?? [];
+  // Status filter is applied client-side over the current page (the catalog API
+  // has no progress dimension). "All" shows everything.
+  const problems = status ? allProblems.filter((p) => statusOf(p.id) === status) : allProblems;
   const meta = query.data?.meta;
 
   function resetPageThen(setter: () => void) {
@@ -105,6 +136,18 @@ export default function ProblemsPage() {
             onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
+
+        <FilterSelect
+          label="Status"
+          value={status}
+          onChange={(v) => setStatus(v as typeof status)}
+          options={[
+            { value: "", label: "All" },
+            { value: "solved", label: "Solved" },
+            { value: "attempted", label: "Attempted" },
+            { value: "unsolved", label: "Unsolved" },
+          ]}
+        />
 
         <FilterSelect
           label="Difficulty"
@@ -173,12 +216,23 @@ export default function ProblemsPage() {
                 <TableRow key={p.id}>
                   <TableCell className="font-medium">
                     <span className="flex items-center gap-2">
+                      <StatusMark status={statusOf(p.id)} />
                       <Link
                         href={`/problems/${p.id}`}
                         className="rounded-sm underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       >
                         {p.title}
                       </Link>
+                      {statusOf(p.id) === "solved" && (
+                        <span className="rounded-full bg-success/10 px-2 py-0.5 text-2xs font-medium text-success">
+                          Solved
+                        </span>
+                      )}
+                      {statusOf(p.id) === "attempted" && (
+                        <span className="rounded-full bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning">
+                          Attempted
+                        </span>
+                      )}
                       {p.is_premium && (
                         <span className="text-2xs uppercase text-warning">Premium</span>
                       )}
@@ -224,6 +278,18 @@ export default function ProblemsPage() {
       )}
     </div>
   );
+}
+
+/** Leading status glyph: filled check (solved), dashed ring (attempted), faint
+ *  ring (unsolved). Color is paired with the badge text so it's not the sole cue. */
+function StatusMark({ status }: { status: "solved" | "attempted" | "unsolved" }) {
+  if (status === "solved") {
+    return <CheckCircle2 className="size-4 shrink-0 text-success" aria-label="Solved" />;
+  }
+  if (status === "attempted") {
+    return <CircleDashed className="size-4 shrink-0 text-warning" aria-label="Attempted" />;
+  }
+  return <Circle className="size-4 shrink-0 text-muted-foreground/40" aria-label="Not started" />;
 }
 
 function FilterSelect({

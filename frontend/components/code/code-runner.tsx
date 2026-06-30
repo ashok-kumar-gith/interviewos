@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { CodeEditor } from "@/components/code/code-editor";
 import { ApiError } from "@/lib/api/client";
 import { runCode, type CodeLanguage, type RunResult } from "@/lib/api/coderun";
 import { cn } from "@/lib/utils";
@@ -101,13 +102,14 @@ export function CodeRunner({ defaultLanguage = "python", defaultSource, classNam
             <label htmlFor="code-runner-source" className="text-sm font-medium">
               Source
             </label>
-            <Textarea
+            <CodeEditor
               id="code-runner-source"
+              language={language}
               value={source}
-              onChange={(e) => setSource(e.target.value)}
-              spellCheck={false}
+              onChange={setSource}
               rows={12}
-              className={cn(MONO, "resize-y")}
+              disabled={mutation.isPending}
+              aria-label="Source code"
               placeholder="Write code here…"
             />
           </div>

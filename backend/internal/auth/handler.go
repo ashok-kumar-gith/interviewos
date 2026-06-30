@@ -122,6 +122,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 		a.POST("/logout", h.Logout)
 		a.POST("/forgot-password", forgot...)
 		a.POST("/reset-password", reset...)
+		a.GET("/oauth/:provider/start", h.OAuthStart)
 		a.GET("/oauth/:provider/callback", h.OAuthCallback)
 		a.GET("/me", RequireAuth(h.tokens), h.Me)
 	}
@@ -274,6 +275,20 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 	}
 	h.clearRefreshCookie(c)
 	c.Status(http.StatusNoContent)
+}
+
+// OAuthStart handles GET /auth/oauth/:provider/start. It redirects the browser
+// to the provider's authorization URL when configured; when the provider has no
+// credentials (the local default) it returns a clear 501 OAUTH_NOT_CONFIGURED
+// envelope instead of a raw 404, so the SPA can show a friendly message.
+func (h *Handler) OAuthStart(c *gin.Context) {
+	provider := c.Param("provider")
+	url, err := h.svc.OAuthStart(provider)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.Redirect(http.StatusFound, url)
 }
 
 // OAuthCallback handles GET /auth/oauth/:provider/callback.

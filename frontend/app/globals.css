@@ -145,3 +145,26 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- Code editor (highlight-behind-textarea) ---- */
+@layer components {
+  /* The textarea and the highlight <pre> must render glyphs identically so the
+     transparent caret/selection lines up with the colored text beneath. */
+  .code-editor .code-layer {
+    tab-size: 2;
+    -moz-tab-size: 2;
+    font-variant-ligatures: none;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
+  /* Token colors — light theme defaults; .dark overrides below. Comments
+     follow the theme's muted foreground in both modes. */
+  .tok-kw  { color: hsl(248 70% 52%); font-weight: 600; }   /* keywords */
+  .tok-str { color: hsl(150 45% 34%); }                     /* strings */
+  .tok-num { color: hsl(28 75% 42%); }                      /* numbers */
+  .tok-com { color: hsl(var(--muted-foreground)); font-style: italic; } /* comments */
+
+  .dark .tok-kw  { color: hsl(248 90% 78%); }
+  .dark .tok-str { color: hsl(150 55% 60%); }
+  .dark .tok-num { color: hsl(28 90% 66%); }
+}

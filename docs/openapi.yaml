@@ -103,6 +103,22 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /auth/oauth/{provider}/start:
+    get:
+      tags: [Auth]
+      summary: Begin an OAuth sign-in (redirects to the provider)
+      description: >-
+        Redirects (302) to the provider's authorization page when configured.
+        Returns 501 OAUTH_NOT_CONFIGURED when the provider has no credentials
+        (the local default), so the SPA can show a clear message rather than a
+        raw error page.
+      operationId: oauthStart
+      parameters:
+        - { name: provider, in: path, required: true, schema: { type: string, enum: [google, github] } }
+      responses:
+        '302': { description: Redirect to the provider authorization URL }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '501': { description: OAuth provider not configured, content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } } }
   /auth/oauth/{provider}/callback:
     get:
       tags: [Auth]
