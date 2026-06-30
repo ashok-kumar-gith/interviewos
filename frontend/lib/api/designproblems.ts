@@ -38,3 +38,8 @@ export function saveDesignProblemProgress(
 ): Promise<DesignProblemProgress> {
   return api.put<DesignProblemProgress>(`/design-problems/${id}/progress`, body);
 }
+
+/** DELETE /design-problems/{id}/progress — clear the caller's progress (204). */
+export function deleteDesignProblemProgress(id: string): Promise<void> {
+  return api.delete<void>(`/design-problems/${id}/progress`);
+}

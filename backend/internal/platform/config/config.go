@@ -47,6 +47,12 @@ type Config struct {
 	// MetricsEnabled gates the Prometheus metrics middleware and /metrics
 	// endpoint. Default true.
 	MetricsEnabled bool
+	// CodeRunnerEnabled gates the POST /code/run endpoint. It is OFF by default
+	// because the local executor runs arbitrary code with the server's privileges
+	// (acceptable only for single-user local dev; never enable on a shared/exposed
+	// deployment without swapping in a sandboxed executor). Set CODE_RUNNER_ENABLED=true
+	// to opt in locally.
+	CodeRunnerEnabled bool
 	// RateLimitPerMin is the default per-IP request budget per minute applied to
 	// general endpoints. Default 60.
 	RateLimitPerMin int
@@ -129,6 +135,7 @@ func Load() (*Config, error) {
 		AIEnabled:       v.GetBool("AI_ENABLED"),
 
 		MetricsEnabled:      v.GetBool("METRICS_ENABLED"),
+		CodeRunnerEnabled:   v.GetBool("CODE_RUNNER_ENABLED"),
 		RateLimitPerMin:     v.GetInt("RATE_LIMIT_PER_MIN"),
 		AuthRateLimitPerMin: v.GetInt("AUTH_RATE_LIMIT_PER_MIN"),
 		UserRateLimitPerMin: v.GetInt("USER_RATE_LIMIT_PER_MIN"),

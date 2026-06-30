@@ -161,6 +161,16 @@ func (s *Service) DeleteProject(ctx context.Context, userID, projectID uuid.UUID
 	return s.repo.DeleteProject(ctx, userID, projectID)
 }
 
+// DeleteProfile soft-deletes the user's resume profile. The profile must exist
+// (ErrProfileNotFound -> 404 otherwise).
+func (s *Service) DeleteProfile(ctx context.Context, userID uuid.UUID) error {
+	// Existence/ownership check first so a missing profile returns 404.
+	if _, err := s.repo.GetProfileByUserID(ctx, userID); err != nil {
+		return err
+	}
+	return s.repo.DeleteProfile(ctx, userID)
+}
+
 // Score runs the deterministic ATS scorer over the user's profile + projects,
 // persists the resulting ats_score / ai_feedback, and returns the result.
 func (s *Service) Score(ctx context.Context, userID uuid.UUID) (ScoreResult, error) {
@@ -188,6 +198,74 @@ func (s *Service) Score(ctx context.Context, userID uuid.UUID) (ScoreResult, err
 		return ScoreResult{}, perr
 	}
 	return result, nil
+}
+
+// File upload constraints.
+const (
+	// maxFileBytes caps an uploaded resume at ~5MB.
+	maxFileBytes = 5 * 1024 * 1024
+
+	mimePDF   = "application/pdf"
+	mimeDOCX  = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	mimeOctet = "application/octet-stream"
+)
+
+// FileInput is the validated payload for uploading a resume file.
+type FileInput struct {
+	FileName    string
+	ContentType string
+	Content     []byte
+}
+
+// GetFile returns the user's current resume file or ErrFileNotFound.
+func (s *Service) GetFile(ctx context.Context, userID uuid.UUID) (*ResumeFile, error) {
+	return s.repo.GetFile(ctx, userID)
+}
+
+// UploadFile validates and stores (replacing any existing) the user's resume file.
+func (s *Service) UploadFile(ctx context.Context, userID uuid.UUID, in FileInput) (*ResumeFile, error) {
+	if err := validateFile(in); err != nil {
+		return nil, err
+	}
+	f := &ResumeFile{
+		ID:          uuid.New(),
+		UserID:      userID,
+		FileName:    strings.TrimSpace(in.FileName),
+		ContentType: in.ContentType,
+		SizeBytes:   len(in.Content),
+		Content:     in.Content,
+	}
+	if err := s.repo.UpsertFile(ctx, f); err != nil {
+		return nil, err
+	}
+	return s.repo.GetFile(ctx, userID)
+}
+
+// DeleteFile removes the user's current resume file. It returns ErrFileNotFound
+// when there is nothing to delete.
+func (s *Service) DeleteFile(ctx context.Context, userID uuid.UUID) error {
+	if _, err := s.repo.GetFile(ctx, userID); err != nil {
+		return err
+	}
+	return s.repo.DeleteFile(ctx, userID)
+}
+
+func validateFile(in FileInput) error {
+	if strings.TrimSpace(in.FileName) == "" {
+		return fmt.Errorf("%w: file name is required", ErrValidation)
+	}
+	if len(in.Content) == 0 {
+		return fmt.Errorf("%w: file is empty", ErrValidation)
+	}
+	if len(in.Content) > maxFileBytes {
+		return fmt.Errorf("%w: file too large (max 5MB)", ErrValidation)
+	}
+	switch in.ContentType {
+	case mimePDF, mimeDOCX, mimeOctet:
+		return nil
+	default:
+		return fmt.Errorf("%w: unsupported content type %q (allow PDF or DOCX)", ErrValidation, in.ContentType)
+	}
 }
 
 // --- builders & validation ---

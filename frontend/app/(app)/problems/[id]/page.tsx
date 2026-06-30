@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, ExternalLink, Lightbulb, ListChecks, Shapes, TriangleAlert } from "lucide-react";
+import { Building2, ExternalLink, Lightbulb, ListChecks, Shapes, Terminal, TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { DifficultyPill } from "@/components/ui/difficulty-pill";
@@ -15,6 +15,8 @@ import {
 } from "@/components/detail/detail-layout";
 import { getProblem, type ProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
+import { ProblemProgressPanel } from "@/components/detail/problem-progress";
+import { CodeRunner } from "@/components/code/code-runner";
 
 const SOURCE_LABEL: Record<string, string> = {
   blind75: "Blind 75",
@@ -88,6 +90,12 @@ export default function ProblemDetailPage({ params }: { params: Promise<{ id: st
           )}
         </div>
       </header>
+
+      <ProblemProgressPanel problemId={id} />
+
+      <DetailSection title="Run code" icon={Terminal}>
+        <CodeRunner />
+      </DetailSection>
 
       <MarkdownSection title="Problem" icon={ListChecks} content={p.prompt_summary} />
       <MarkdownSection title="Approach" icon={Lightbulb} content={p.approach_md} />

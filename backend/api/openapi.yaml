@@ -57,6 +57,8 @@ tags:
     description: In-app notifications.
   - name: AI
     description: AI assistants (planner, coach, reviewers, weakness detector).
+  - name: Code
+    description: Server-side code execution (run a snippet, capture stdout/stderr/exit).
 
 paths:
   # ---------------- AUTH ----------------
@@ -708,6 +710,77 @@ paths:
               schema: { $ref: '#/components/schemas/DesignProblemProgress' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [SystemDesign]
+      summary: Clear the caller's progress on a design problem
+      operationId: deleteDesignProblemProgress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: designProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: No Content (progress cleared; no-op when none recorded) }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /problems/{problemId}/progress:
+    get:
+      tags: [DSA]
+      summary: Get the caller's progress + stored solution for a DSA problem
+      operationId: getProblemProgress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: problemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProblemProgress' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [DSA]
+      summary: Record solve state + solution for a DSA problem
+      operationId: saveProblemProgress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: problemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                solved: { type: boolean }
+                confidence: { type: integer, minimum: 1, maximum: 5, nullable: true }
+                time_spent_minutes: { type: integer, minimum: 0 }
+                solution_code: { type: string, nullable: true }
+                solution_language: { type: string, nullable: true }
+                solution_notes: { type: string, nullable: true }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProblemProgress' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [DSA]
+      summary: Clear the caller's progress + solution for a DSA problem
+      operationId: deleteProblemProgress
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: problemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: No Content }
+
+  /problems/solved:
+    get:
+      tags: [DSA]
+      summary: The caller's solved/attempted problem log
+      operationId: listSolvedProblems
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ProblemProgress' } }
 
   # ---------------- BACKEND ENGINEERING ----------------
   /backend-engineering/topics:
@@ -887,6 +960,13 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeProfile' } } } }
         '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Resume]
+      summary: Delete my resume profile
+      operationId: deleteResumeProfile
+      responses:
+        '204': { description: No Content (profile deleted) }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /resume/projects:
     get:
@@ -940,6 +1020,52 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeScoreResponse' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/AIUnavailable' }
+
+  /resume/file:
+    post:
+      tags: [Resume]
+      summary: Upload (or replace) my resume file
+      operationId: uploadResumeFile
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: PDF or DOCX, max 5MB }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeFileMeta' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    get:
+      tags: [Resume]
+      summary: Download my resume file
+      operationId: downloadResumeFile
+      responses:
+        '200':
+          description: The resume file bytes (Content-Disposition attachment).
+          content:
+            application/pdf: { schema: { type: string, format: binary } }
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document: { schema: { type: string, format: binary } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Resume]
+      summary: Delete my resume file
+      operationId: deleteResumeFile
+      responses:
+        '204': { description: No Content }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /resume/file/meta:
+    get:
+      tags: [Resume]
+      summary: Get my resume file metadata
+      operationId: getResumeFileMeta
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ResumeFileMeta' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ---------------- MOCK ----------------
   /mock-interviews:
@@ -1064,6 +1190,34 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RevisionItem' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
+
+  # ---------------- CODE ----------------
+  /code/run:
+    post:
+      tags: [Code]
+      summary: Run a code snippet and capture stdout/stderr/exit
+      description: >
+        Executes the submitted source server-side against a sandboxed runtime and
+        returns the captured stdout, stderr, and exit code. A program that runs
+        but exits non-zero is still a successful response (ran=true). Unsupported
+        languages and oversized payloads return 422; an unreachable or timed-out
+        executor returns 502/504 with a clear message (never a 500 panic).
+      operationId: runCode
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CodeRunRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CodeRunResult' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '502':
+          description: Code executor unavailable
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
+        '504':
+          description: Code execution timed out
+          content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
 
   # ---------------- COMPANY ----------------
   /companies:
@@ -1413,6 +1567,48 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
 
   schemas:
+    CodeRunRequest:
+      type: object
+      required: [language, source]
+      properties:
+        language:
+          type: string
+          description: Language to run the snippet in.
+          enum: [python, javascript, typescript, go, java, cpp, c]
+        source:
+          type: string
+          description: Source code (max ~64KB).
+          maxLength: 65536
+        stdin:
+          type: string
+          description: Optional input piped to the program's stdin (max ~16KB).
+          maxLength: 16384
+    CodeRunResult:
+      type: object
+      required: [stdout, stderr, exit_code, language, version, ran]
+      properties:
+        stdout: { type: string, description: Captured standard output. }
+        stderr: { type: string, description: Captured standard error (includes compile diagnostics). }
+        exit_code: { type: integer, description: Process exit code (0 on success). }
+        language: { type: string, description: Resolved language identifier. }
+        version: { type: string, description: Runtime version that executed the snippet. }
+        ran: { type: boolean, description: True when the executor accepted and processed the submission. }
+        message: { type: string, description: Optional note (e.g. "compilation failed"). }
+    ProblemProgress:
+      type: object
+      properties:
+        problem_id: { type: string, format: uuid }
+        status: { type: string, enum: [not_started, in_progress, completed, needs_review] }
+        solved: { type: boolean }
+        confidence: { type: integer, nullable: true }
+        attempts: { type: integer }
+        time_spent_minutes: { type: integer }
+        solved_at: { type: string, format: date-time, nullable: true }
+        solution_code: { type: string, nullable: true }
+        solution_language: { type: string, nullable: true }
+        solution_notes: { type: string, nullable: true }
+        solution_updated_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
     DesignProblemProgress:
       type: object
       properties:
@@ -2081,6 +2277,15 @@ components:
         missing_keywords: { type: array, items: { type: string } }
         suggestions: { type: array, items: { type: string } }
         used_fallback: { type: boolean }
+
+    ResumeFileMeta:
+      type: object
+      required: [file_name, content_type, size_bytes, uploaded_at]
+      properties:
+        file_name: { type: string }
+        content_type: { type: string }
+        size_bytes: { type: integer }
+        uploaded_at: { type: string, format: date-time }
 
     # ---- Mock ----
     MockInterview:

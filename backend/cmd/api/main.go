@@ -25,9 +25,11 @@ import (
 	"github.com/interviewos/backend/internal/auth"
 	"github.com/interviewos/backend/internal/backendeng"
 	"github.com/interviewos/backend/internal/behavioral"
+	"github.com/interviewos/backend/internal/coderun"
 	"github.com/interviewos/backend/internal/company"
 	"github.com/interviewos/backend/internal/content"
 	"github.com/interviewos/backend/internal/designproblems"
+	"github.com/interviewos/backend/internal/dsaprogress"
 	"github.com/interviewos/backend/internal/intake"
 	"github.com/interviewos/backend/internal/lld"
 	"github.com/interviewos/backend/internal/mock"
@@ -223,6 +225,12 @@ func run() error {
 				tokens,
 			))
 
+		// DSA problem progress + stored solutions (user-scoped): mark solved, when,
+		// and save the solution code/language/notes. Companion to the public
+		// /problems catalog (internal/content), mirroring designproblems progress.
+		registrars = append(registrars,
+			dsaprogress.NewHandler(dsaprogress.NewService(dsaprogress.NewRepository(db)), tokens))
+
 		// LLD problems catalog — read-only, public.
 		registrars = append(registrars,
 			lld.NewHandler(lld.NewService(lld.NewRepository(db))))
@@ -237,6 +245,27 @@ func run() error {
 			}),
 			Tokens: tokens,
 		}))
+
+		// Code Runner module (user-scoped). Executes a code snippet server-side
+		// using local toolchains (python3/node/go/gcc/g++/javac) and returns
+		// stdout/stderr/exit. The public Piston API went whitelist-only (2026-02),
+		// so the local executor is the default; a production deploy should point
+		// this at a sandboxed runner. Resilient: timeouts/missing-toolchain are a
+		// clear error envelope, never a 500 panic.
+		//
+		// SECURITY: the local executor runs arbitrary code with the server's
+		// privileges, so the endpoint is OFF unless CODE_RUNNER_ENABLED=true.
+		// Enable only for single-user local dev; never on a shared/exposed deploy
+		// without a sandboxed (container/gVisor/Firecracker) executor.
+		if cfg.CodeRunnerEnabled {
+			log.Warn("code runner ENABLED: /code/run executes arbitrary code with server privileges — local dev only")
+			registrars = append(registrars, coderun.NewHandler(coderun.HandlerConfig{
+				Service: coderun.NewService(coderun.ServiceConfig{Executor: coderun.NewLocalExecutor()}),
+				Tokens:  tokens,
+			}))
+		} else {
+			log.Info("code runner disabled (set CODE_RUNNER_ENABLED=true to opt in for local dev)")
+		}
 
 		// Analytics module (readiness, snapshots, weak/strong topics, time-spent).
 		// Reuses analyticsSvc built above (also the progress snapshotter).

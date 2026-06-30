@@ -4,6 +4,7 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
+  Download,
   FileText,
   Gauge,
   Pencil,
@@ -11,6 +12,7 @@ import {
   RefreshCw,
   Sparkles,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,12 +29,17 @@ import { ResumeProjectEditor } from "@/components/resume/resume-project-editor";
 import { ApiError } from "@/lib/api/client";
 import {
   createResumeProject,
+  deleteResumeFile,
   deleteResumeProject,
+  downloadResumeFile,
+  getResumeFileMeta,
   getResumeProfile,
   listResumeProjects,
   scoreResume,
   updateResumeProject,
+  uploadResumeFile,
   upsertResumeProfile,
+  type ResumeFileMeta,
   type ResumeProfile,
   type ResumeProject,
   type ResumeProjectUpsert,
@@ -41,6 +48,7 @@ import {
 
 const PROFILE_KEY = ["resume", "profile"] as const;
 const PROJECTS_KEY = ["resume", "projects"] as const;
+const FILE_META_KEY = ["resume", "file", "meta"] as const;
 
 type ProjectEditor =
   | { mode: "closed" }
@@ -210,6 +218,9 @@ export default function ResumePage() {
         </Card>
       )}
 
+      {/* Resume file */}
+      <ResumeFileCard />
+
       {/* Profile editor */}
       <Card>
         <CardContent className="space-y-4 p-5">
@@ -357,6 +368,131 @@ export default function ResumePage() {
       </Dialog>
     </Page>
   );
+}
+
+const ACCEPTED_FILE_TYPES = ".pdf,.docx";
+
+function ResumeFileCard() {
+  const queryClient = useQueryClient();
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const metaQuery = useQuery<ResumeFileMeta | null, unknown>({
+    queryKey: FILE_META_KEY,
+    queryFn: () =>
+      getResumeFileMeta().catch((err) => {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }),
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => uploadResumeFile(file),
+    onMutate: () => setError(null),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: FILE_META_KEY }),
+    onError: (err) =>
+      setError(
+        err instanceof ApiError && (err.status === 422 || err.status === 400)
+          ? err.message || "That file couldn't be uploaded. Use a PDF or DOCX under 5MB."
+          : "Couldn't upload your resume file. Try again.",
+      ),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteResumeFile(),
+    onMutate: () => setError(null),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: FILE_META_KEY }),
+    onError: () => setError("Couldn't delete your resume file. Try again."),
+  });
+
+  const downloadMutation = useMutation({
+    mutationFn: (fileName: string) => downloadResumeFile(fileName),
+    onMutate: () => setError(null),
+    onError: () => setError("Couldn't download your resume file. Try again."),
+  });
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (file) uploadMutation.mutate(file);
+  }
+
+  const meta = metaQuery.data;
+  const busy = uploadMutation.isPending;
+
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-5">
+        <h2 className="text-h3">Resume file</h2>
+        <p className="text-sm text-muted-foreground">
+          Upload your resume as a PDF or DOCX (max 5MB). One file is kept — uploading again replaces it.
+        </p>
+
+        {error && <Alert variant="danger">{error}</Alert>}
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept={ACCEPTED_FILE_TYPES}
+          className="sr-only"
+          onChange={onPickFile}
+          aria-label="Choose a resume file to upload"
+        />
+
+        {metaQuery.isLoading ? (
+          <Skeleton className="h-10 w-full" />
+        ) : meta ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileText className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{meta.file_name}</p>
+                <p className="text-xs text-muted-foreground">{formatBytes(meta.size_bytes)}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadMutation.mutate(meta.file_name)}
+                loading={downloadMutation.isPending}
+              >
+                <Download aria-hidden /> Download
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => inputRef.current?.click()}
+                loading={busy}
+              >
+                <Upload aria-hidden /> Replace
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 text-muted-foreground hover:text-danger"
+                onClick={() => deleteMutation.mutate()}
+                loading={deleteMutation.isPending}
+                aria-label="Delete resume file"
+              >
+                <Trash2 aria-hidden />
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="outline" onClick={() => inputRef.current?.click()} loading={busy}>
+            <Upload aria-hidden /> Upload resume file
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function Page({

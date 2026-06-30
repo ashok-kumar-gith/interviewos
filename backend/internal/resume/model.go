@@ -102,3 +102,22 @@ type Project struct {
 
 // TableName pins the table name for GORM.
 func (Project) TableName() string { return "resume_projects" }
+
+// ResumeFile is a user's uploaded resume file (table: resume_files). The bytes
+// are stored inline in the Content column. Exactly one active file per user
+// (partial unique index on user_id WHERE deleted_at IS NULL); replacing a resume
+// soft-deletes the previous row.
+type ResumeFile struct {
+	ID          uuid.UUID      `gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	UserID      uuid.UUID      `gorm:"column:user_id;type:uuid;not null"`
+	FileName    string         `gorm:"column:file_name;not null"`
+	ContentType string         `gorm:"column:content_type;not null"`
+	SizeBytes   int            `gorm:"column:size_bytes;not null"`
+	Content     []byte         `gorm:"column:content;type:bytea;not null"`
+	CreatedAt   time.Time      `gorm:"column:created_at;not null;default:now()"`
+	UpdatedAt   time.Time      `gorm:"column:updated_at;not null;default:now()"`
+	DeletedAt   gorm.DeletedAt `gorm:"column:deleted_at;index"`
+}
+
+// TableName pins the table name for GORM.
+func (ResumeFile) TableName() string { return "resume_files" }

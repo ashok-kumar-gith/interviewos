@@ -17,6 +17,7 @@ type Repository interface {
 	CreateProfile(ctx context.Context, p *Profile) error
 	UpdateProfile(ctx context.Context, p *Profile) error
 	UpdateScore(ctx context.Context, profileID uuid.UUID, atsScore float64, aiFeedback []byte) error
+	DeleteProfile(ctx context.Context, userID uuid.UUID) error
 
 	// Projects.
 	ListProjects(ctx context.Context, profileID uuid.UUID) ([]Project, error)
@@ -24,6 +25,11 @@ type Repository interface {
 	CreateProject(ctx context.Context, p *Project) error
 	UpdateProject(ctx context.Context, p *Project) error
 	DeleteProject(ctx context.Context, userID, projectID uuid.UUID) error
+
+	// Resume file (uploaded bytes).
+	UpsertFile(ctx context.Context, f *ResumeFile) error
+	GetFile(ctx context.Context, userID uuid.UUID) (*ResumeFile, error)
+	DeleteFile(ctx context.Context, userID uuid.UUID) error
 }
 
 // gormRepository is the GORM-backed Repository implementation.
@@ -130,4 +136,45 @@ func (r *gormRepository) DeleteProject(ctx context.Context, userID, projectID uu
 	return r.db.WithContext(ctx).
 		Where("id = ? AND user_id = ?", projectID, userID).
 		Delete(&Project{}).Error
+}
+
+// DeleteProfile soft-deletes the user's resume profile.
+func (r *gormRepository) DeleteProfile(ctx context.Context, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Delete(&Profile{}).Error
+}
+
+// UpsertFile replaces the user's current resume file: it soft-deletes any
+// existing live row then inserts the new one, all in a transaction so the
+// partial unique index on (user_id) WHERE deleted_at IS NULL is never violated.
+func (r *gormRepository) UpsertFile(ctx context.Context, f *ResumeFile) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ?", f.UserID).Delete(&ResumeFile{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(f).Error
+	})
+}
+
+// GetFile returns the user's current (non-deleted) resume file or ErrFileNotFound.
+func (r *gormRepository) GetFile(ctx context.Context, userID uuid.UUID) (*ResumeFile, error) {
+	var f ResumeFile
+	err := r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		First(&f).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrFileNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+// DeleteFile soft-deletes the user's current resume file.
+func (r *gormRepository) DeleteFile(ctx context.Context, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ?", userID).
+		Delete(&ResumeFile{}).Error
 }

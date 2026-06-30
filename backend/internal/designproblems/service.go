@@ -125,3 +125,16 @@ func (s *Service) SaveProgress(ctx context.Context, userID, dpID uuid.UUID, in P
 	}
 	return s.progress.Upsert(ctx, userID, dpID, in, time.Now().UTC())
 }
+
+// DeleteProgress clears the caller's progress on a design problem. The problem
+// must exist (404 otherwise); clearing when no progress recorded is a no-op.
+func (s *Service) DeleteProgress(ctx context.Context, userID, dpID uuid.UUID) error {
+	if s.progress == nil {
+		return ErrNotFound
+	}
+	// The design problem must exist (surfaces 404 for a bad id).
+	if _, err := s.repo.GetByID(ctx, dpID); err != nil {
+		return err
+	}
+	return s.progress.Delete(ctx, userID, dpID)
+}

@@ -11,8 +11,9 @@ import (
 
 // fakeRepository is an in-memory Repository for unit tests.
 type fakeRepository struct {
-	profiles map[uuid.UUID]*Profile // keyed by user_id
-	projects map[uuid.UUID]*Project // keyed by project id
+	profiles map[uuid.UUID]*Profile    // keyed by user_id
+	projects map[uuid.UUID]*Project    // keyed by project id
+	files    map[uuid.UUID]*ResumeFile // keyed by user_id
 }
 
 func newFakeRepo() *fakeRepository {
@@ -110,6 +111,46 @@ func (f *fakeRepository) DeleteProject(_ context.Context, userID, projectID uuid
 		return ErrProjectNotFound
 	}
 	delete(f.projects, projectID)
+	return nil
+}
+
+func (f *fakeRepository) DeleteProfile(_ context.Context, userID uuid.UUID) error {
+	p, ok := f.profiles[userID]
+	if !ok {
+		return ErrProfileNotFound
+	}
+	for id, pr := range f.projects {
+		if pr.ResumeProfileID == p.ID {
+			delete(f.projects, id)
+		}
+	}
+	delete(f.profiles, userID)
+	return nil
+}
+
+func (f *fakeRepository) UpsertFile(_ context.Context, file *ResumeFile) error {
+	if f.files == nil {
+		f.files = map[uuid.UUID]*ResumeFile{}
+	}
+	cp := *file
+	f.files[file.UserID] = &cp
+	return nil
+}
+
+func (f *fakeRepository) GetFile(_ context.Context, userID uuid.UUID) (*ResumeFile, error) {
+	file, ok := f.files[userID]
+	if !ok {
+		return nil, ErrFileNotFound
+	}
+	cp := *file
+	return &cp, nil
+}
+
+func (f *fakeRepository) DeleteFile(_ context.Context, userID uuid.UUID) error {
+	if _, ok := f.files[userID]; !ok {
+		return ErrFileNotFound
+	}
+	delete(f.files, userID)
 	return nil
 }
 

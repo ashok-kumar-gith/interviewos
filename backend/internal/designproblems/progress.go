@@ -56,6 +56,9 @@ type ProgressRepository interface {
 	// Upsert records progress idempotently per (user, design problem), bumping
 	// attempts/time and stamping completion the first time status hits completed.
 	Upsert(ctx context.Context, userID, designProblemID uuid.UUID, in ProgressInput, now time.Time) (*Progress, error)
+	// Delete soft-deletes the user's progress on a design problem. Deleting when
+	// no progress exists is a no-op (no error).
+	Delete(ctx context.Context, userID, designProblemID uuid.UUID) error
 }
 
 // NewProgressRepository returns a gorm-backed ProgressRepository.
@@ -115,4 +118,10 @@ func (r *gormProgressRepository) Upsert(ctx context.Context, userID, dpID uuid.U
 		return nil, err
 	}
 	return r.Get(ctx, userID, dpID)
+}
+
+func (r *gormProgressRepository) Delete(ctx context.Context, userID, dpID uuid.UUID) error {
+	return r.db.WithContext(ctx).
+		Where("user_id = ? AND design_problem_id = ?", userID, dpID).
+		Delete(&Progress{}).Error
 }

@@ -2,7 +2,10 @@ package resume
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -38,11 +41,16 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 	{
 		r.GET("/profile", h.GetProfile)
 		r.PUT("/profile", h.UpsertProfile)
+		r.DELETE("/profile", h.DeleteProfile)
 		r.GET("/projects", h.ListProjects)
 		r.POST("/projects", h.CreateProject)
 		r.PUT("/projects/:projectId", h.UpdateProject)
 		r.DELETE("/projects/:projectId", h.DeleteProject)
 		r.POST("/score", h.Score)
+		r.POST("/file", h.UploadFile)
+		r.GET("/file", h.DownloadFile)
+		r.GET("/file/meta", h.GetFileMeta)
+		r.DELETE("/file", h.DeleteFile)
 	}
 }
 
@@ -106,6 +114,15 @@ type scoreResponse struct {
 	UsedFallback    bool             `json:"used_fallback"`
 }
 
+type fileMetaResponse struct {
+	FileName    string `json:"file_name"`
+	ContentType string `json:"content_type"`
+	SizeBytes   int    `json:"size_bytes"`
+	UploadedAt  string `json:"uploaded_at"`
+}
+
+const maxUploadBytes = 5 * 1024 * 1024
+
 // ---- Handlers ----
 
 // GetProfile handles GET /resume/profile.
@@ -144,6 +161,20 @@ func (h *Handler) UpsertProfile(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, toProfileResponse(p))
+}
+
+// DeleteProfile handles DELETE /resume/profile, soft-deleting the user's
+// resume profile.
+func (h *Handler) DeleteProfile(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteProfile(c.Request.Context(), uid); err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // ListProjects handles GET /resume/projects.
@@ -242,6 +273,96 @@ func (h *Handler) Score(c *gin.Context) {
 	})
 }
 
+// UploadFile handles POST /resume/file (multipart/form-data, field "file").
+func (h *Handler) UploadFile(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	fh, err := c.FormFile("file")
+	if err != nil {
+		server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "missing 'file' upload field", nil)
+		return
+	}
+	if fh.Size > maxUploadBytes {
+		server.AbortError(c, http.StatusUnprocessableEntity, server.CodeValidationError, "file too large (max 5MB)", nil)
+		return
+	}
+	src, err := fh.Open()
+	if err != nil {
+		server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "could not read uploaded file", nil)
+		return
+	}
+	defer src.Close()
+	content, err := io.ReadAll(io.LimitReader(src, maxUploadBytes+1))
+	if err != nil {
+		server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "could not read uploaded file", nil)
+		return
+	}
+
+	f, err := h.svc.UploadFile(c.Request.Context(), uid, FileInput{
+		FileName:    filepath.Base(fh.Filename),
+		ContentType: fh.Header.Get("Content-Type"),
+		Content:     content,
+	})
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, toFileMetaResponse(f))
+}
+
+// DownloadFile handles GET /resume/file — streams the stored bytes as an attachment.
+func (h *Handler) DownloadFile(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	f, err := h.svc.GetFile(c.Request.Context(), uid)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", f.FileName))
+	c.Data(http.StatusOK, f.ContentType, f.Content)
+}
+
+// GetFileMeta handles GET /resume/file/meta — JSON metadata only.
+func (h *Handler) GetFileMeta(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	f, err := h.svc.GetFile(c.Request.Context(), uid)
+	if err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toFileMetaResponse(f))
+}
+
+// DeleteFile handles DELETE /resume/file.
+func (h *Handler) DeleteFile(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteFile(c.Request.Context(), uid); err != nil {
+		h.writeServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func toFileMetaResponse(f *ResumeFile) fileMetaResponse {
+	return fileMetaResponse{
+		FileName:    f.FileName,
+		ContentType: f.ContentType,
+		SizeBytes:   f.SizeBytes,
+		UploadedAt:  f.CreatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
 // ---- helpers ----
 
 func (h *Handler) userID(c *gin.Context) (uuid.UUID, bool) {
@@ -278,6 +399,8 @@ func (h *Handler) writeServiceError(c *gin.Context, err error) {
 		server.AbortError(c, http.StatusNotFound, server.CodeNotFound, "resume profile not found", nil)
 	case errors.Is(err, ErrProjectNotFound):
 		server.AbortError(c, http.StatusNotFound, server.CodeNotFound, "resume project not found", nil)
+	case errors.Is(err, ErrFileNotFound):
+		server.AbortError(c, http.StatusNotFound, server.CodeNotFound, "resume file not found", nil)
 	case errors.Is(err, ErrForbidden):
 		server.AbortError(c, http.StatusForbidden, server.CodeForbidden, "not permitted", nil)
 	case errors.Is(err, ErrValidation):

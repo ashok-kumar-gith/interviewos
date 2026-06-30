@@ -9,6 +9,8 @@ var (
 	ErrProfileNotFound = errors.New("resume: profile not found")
 	// ErrProjectNotFound indicates the project does not exist (404).
 	ErrProjectNotFound = errors.New("resume: project not found")
+	// ErrFileNotFound indicates the user has no uploaded resume file (404).
+	ErrFileNotFound = errors.New("resume: file not found")
 	// ErrForbidden indicates the caller does not own the target resource (403/404).
 	ErrForbidden = errors.New("resume: not permitted")
 	// ErrValidation indicates an input validation failure (422). It wraps the

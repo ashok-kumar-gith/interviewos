@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, RotateCcw } from "lucide-react";
+import { CheckCircle2, RotateCcw, Trash2 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { SegmentedRating } from "@/components/ui/segmented-rating";
 import {
   getDesignProblemProgress,
   saveDesignProblemProgress,
+  deleteDesignProblemProgress,
   type DesignProblemProgress,
 } from "@/lib/api/designproblems";
 import { ApiError } from "@/lib/api/client";
@@ -49,8 +50,26 @@ export function DesignProblemProgressCard({ id }: { id: string }) {
     onError: () => setError("Couldn't save your progress. Try again."),
   });
 
+  const clear = useMutation({
+    mutationFn: () => deleteDesignProblemProgress(id),
+    onMutate: () => setError(null),
+    onSuccess: () => {
+      setConfidence(undefined);
+      queryClient.setQueryData<DesignProblemProgress>(key, {
+        design_problem_id: id,
+        status: "not_started",
+        attempts: 0,
+        time_spent_minutes: 0,
+      });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: () => setError("Couldn't clear your progress. Try again."),
+  });
+
   const status = query.data?.status ?? "not_started";
   const done = status === "completed";
+  const started = status !== "not_started";
+  const busy = save.isPending || clear.isPending;
 
   return (
     <Card className="space-y-4 p-5">
@@ -91,12 +110,17 @@ export function DesignProblemProgressCard({ id }: { id: string }) {
       {error && <Alert variant="danger">{error}</Alert>}
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => save.mutate("completed")} loading={save.isPending} disabled={!confidence}>
+        <Button onClick={() => save.mutate("completed")} loading={save.isPending} disabled={!confidence || busy}>
           <CheckCircle2 aria-hidden /> {done ? "Update" : "Mark complete"}
         </Button>
         {done && (
-          <Button variant="outline" onClick={() => save.mutate("in_progress")} loading={save.isPending}>
+          <Button variant="outline" onClick={() => save.mutate("in_progress")} loading={save.isPending} disabled={busy}>
             <RotateCcw aria-hidden /> Revisit
+          </Button>
+        )}
+        {started && (
+          <Button variant="ghost" onClick={() => clear.mutate()} loading={clear.isPending} disabled={busy}>
+            <Trash2 aria-hidden /> Clear progress
           </Button>
         )}
       </div>

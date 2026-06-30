@@ -40,6 +40,7 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 		authed := v1.Group("", auth.RequireAuth(h.tokens))
 		authed.GET("/design-problems/:designProblemId/progress", h.GetProgress)
 		authed.PUT("/design-problems/:designProblemId/progress", h.SaveProgress)
+		authed.DELETE("/design-problems/:designProblemId/progress", h.DeleteProgress)
 	}
 }
 
@@ -169,6 +170,25 @@ func (h *Handler) SaveProgress(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, toProgressResponse(id, p))
+}
+
+// DeleteProgress handles DELETE /design-problems/:id/progress, clearing the
+// caller's recorded progress on the problem.
+func (h *Handler) DeleteProgress(c *gin.Context) {
+	uid, ok := auth.UserIDFromContext(c)
+	if !ok {
+		server.AbortError(c, http.StatusUnauthorized, server.CodeUnauthenticated, "authentication required", nil)
+		return
+	}
+	id, ok := h.pathUUID(c, "designProblemId")
+	if !ok {
+		return
+	}
+	if err := h.svc.DeleteProgress(c.Request.Context(), uid, id); err != nil {
+		h.writeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // ---- helpers ----
