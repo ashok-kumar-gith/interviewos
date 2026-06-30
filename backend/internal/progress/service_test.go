@@ -263,6 +263,107 @@ func TestGetDashboard_ZeroCoverageGatesReadiness(t *testing.T) {
 	}
 }
 
+// TestBlendCoverage exercises the coverage blend directly: each signal counts
+// only when its denominator is positive, and coverage is the mean of present
+// signals (capped at 1).
+func TestBlendCoverage(t *testing.T) {
+	cases := []struct {
+		name string
+		agg  PillarAggregate
+		want float64
+	}{
+		{"plan-only behaves as before", PillarAggregate{PlannedMinutes: 120, CompletedMinutes: 60}, 0.5},
+		{"items-only drives coverage", PillarAggregate{ItemsTotal: 10, ItemsCompleted: 4}, 0.4},
+		{"both signals are meaned", PillarAggregate{PlannedMinutes: 100, CompletedMinutes: 50, ItemsTotal: 10, ItemsCompleted: 1}, 0.3},
+		{"neither signal ⇒ 0", PillarAggregate{}, 0},
+		{"capped at 1", PillarAggregate{PlannedMinutes: 10, CompletedMinutes: 30, ItemsTotal: 1, ItemsCompleted: 5}, 1},
+	}
+	for _, c := range cases {
+		if got := blendCoverage(c.agg); got != c.want {
+			t.Fatalf("%s: blendCoverage = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestGetDashboard_SolvedProblemsMoveReadiness asserts that an items-completed
+// signal (e.g. solved DSA problems) with no plan tasks at all produces non-zero
+// readiness — the core linkage fix: solving a problem moves the needle.
+func TestGetDashboard_SolvedProblemsMoveReadiness(t *testing.T) {
+	// Before: dsa pillar with no progress ⇒ coverage 0 ⇒ readiness 0.
+	before := &fakeRepo{
+		aggs:   []PillarAggregate{{Pillar: "dsa", Weight: 1.5, ItemsTotal: 10, ItemsCompleted: 0}},
+		dayErr: ErrPlanDayNotFound,
+	}
+	svcBefore := NewService(ServiceConfig{Repo: before, Now: fixedNow})
+	dashBefore, err := svcBefore.GetDashboard(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("before: %v", err)
+	}
+	if dashBefore.PillarReadiness[0].Readiness != 0 {
+		t.Fatalf("expected 0 readiness before solving, got %v", dashBefore.PillarReadiness[0].Readiness)
+	}
+
+	// After: 4 of 10 solved with confidence avg 4 ⇒ coverage 0.4,
+	// readiness = 100*0.4*(0.6*0.75 + 0.4*1.0) = 100*0.4*0.85 = 34.
+	after := &fakeRepo{
+		aggs:   []PillarAggregate{{Pillar: "dsa", Weight: 1.5, ItemsTotal: 10, ItemsCompleted: 4, ConfidenceSum: 16, ConfidenceCount: 4}},
+		dayErr: ErrPlanDayNotFound,
+	}
+	svcAfter := NewService(ServiceConfig{Repo: after, Now: fixedNow})
+	dashAfter, err := svcAfter.GetDashboard(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("after: %v", err)
+	}
+	got := dashAfter.PillarReadiness[0]
+	if got.Coverage != 0.4 {
+		t.Fatalf("expected coverage 0.4 after solving, got %v", got.Coverage)
+	}
+	if got.Readiness != 34 {
+		t.Fatalf("expected readiness 34 after solving, got %v", got.Readiness)
+	}
+	if !(dashAfter.OverallReadiness > dashBefore.OverallReadiness) {
+		t.Fatalf("solving problems must increase overall readiness: before %v, after %v",
+			dashBefore.OverallReadiness, dashAfter.OverallReadiness)
+	}
+}
+
+// TestGetDashboard_AllPillarsPresent asserts every pillar the repository returns
+// surfaces on the dashboard, including zeroed lld/behavioral/resume that have no
+// plan tasks or items yet.
+func TestGetDashboard_AllPillarsPresent(t *testing.T) {
+	repo := &fakeRepo{
+		aggs: []PillarAggregate{
+			{Pillar: "dsa", Weight: 1.5, PlannedMinutes: 100, CompletedMinutes: 50},
+			{Pillar: "system_design", Weight: 1.5, ItemsTotal: 5, ItemsCompleted: 1},
+			{Pillar: "lld", Weight: 1.0},
+			{Pillar: "backend_engineering", Weight: 1.0, PlannedMinutes: 60, CompletedMinutes: 0},
+			{Pillar: "behavioral", Weight: 0.75},
+			{Pillar: "resume", Weight: 0.5},
+		},
+		dayErr: ErrPlanDayNotFound,
+	}
+	svc := NewService(ServiceConfig{Repo: repo, Now: fixedNow})
+	dash, err := svc.GetDashboard(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[string]bool{
+		"dsa": false, "system_design": false, "lld": false,
+		"backend_engineering": false, "behavioral": false, "resume": false,
+	}
+	for _, p := range dash.PillarReadiness {
+		want[p.Pillar] = true
+	}
+	for pillar, present := range want {
+		if !present {
+			t.Fatalf("pillar %q missing from dashboard", pillar)
+		}
+	}
+	if len(dash.PillarReadiness) != 6 {
+		t.Fatalf("expected 6 pillars, got %d", len(dash.PillarReadiness))
+	}
+}
+
 func TestComputeStreakFromDates(t *testing.T) {
 	asOf := time.Date(2026, 6, 29, 9, 0, 0, 0, time.UTC)
 	d := func(day int) time.Time { return time.Date(2026, 6, day, 0, 0, 0, 0, time.UTC) }

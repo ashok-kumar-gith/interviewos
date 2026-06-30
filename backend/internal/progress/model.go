@@ -101,7 +101,10 @@ type PillarReadiness struct {
 
 // PillarAggregate is the raw per-pillar coverage/confidence rollup the
 // dashboard service turns into readiness. It is produced by the repository from
-// the user's plan_tasks (completed vs. planned est-minutes) and progress rows.
+// the user's plan_tasks (completed vs. planned est-minutes) AND from the
+// problem-progress tables (solved DSA problems, completed HLD design problems),
+// so progress made on the problem detail pages — not just via plan tasks —
+// moves dashboard readiness for the relevant pillar.
 type PillarAggregate struct {
 	Pillar           string
 	Weight           float64
@@ -109,6 +112,14 @@ type PillarAggregate struct {
 	CompletedMinutes int
 	ConfidenceSum    int
 	ConfidenceCount  int
+	// ItemsCompleted/ItemsTotal carry the per-pillar "items completed" signal
+	// from the problem-progress tables (DSA: user_problem_progress.solved;
+	// System Design: user_design_problem_progress.status='completed'). When
+	// ItemsTotal > 0 this contributes a coverage term blended with the plan-task
+	// minute coverage. Pillars without a dedicated progress table (LLD,
+	// behavioral, resume) leave these zero and rely on plan-task coverage alone.
+	ItemsCompleted int
+	ItemsTotal     int
 }
 
 // TodaySummary is the dashboard's "today" block.

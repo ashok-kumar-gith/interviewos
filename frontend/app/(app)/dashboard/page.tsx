@@ -211,7 +211,7 @@ export default function DashboardPage() {
               key={p.pillar}
               label={pillarLabel(p.pillar)}
               value={Math.round(p.readiness)}
-              takeaway={`Coverage ${Math.round(p.coverage)}% · Confidence ${p.avg_confidence.toFixed(1)}/5`}
+              takeaway={`Coverage ${Math.round(p.coverage * 100)}% · Confidence ${p.avg_confidence.toFixed(1)}/5`}
               pillar={pillarKey(p.pillar)}
               variant="pillar"
             />

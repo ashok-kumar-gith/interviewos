@@ -276,10 +276,16 @@ func (s *Service) GetDashboard(ctx context.Context, userID uuid.UUID) (*Dashboar
 	pillars := make([]PillarReadiness, 0, len(aggs))
 	var weightedSum, totalWeight float64
 	for _, a := range aggs {
-		coverage := 0.0
-		if a.PlannedMinutes > 0 {
-			coverage = float64(a.CompletedMinutes) / float64(a.PlannedMinutes)
-		}
+		// Coverage blends two breadth signals so that BOTH completing plan tasks
+		// and solving problems on the detail page move the pillar's readiness:
+		//   - planned-minute coverage from plan_tasks (completed/planned minutes), and
+		//   - item coverage from the problem-progress tables (solved DSA problems,
+		//     completed HLD design problems / in-scope totals).
+		// Each term is included only when its denominator is defined; coverage is
+		// the mean of the defined terms. A pillar with only plan tasks (e.g. lld,
+		// backend_engineering) behaves exactly as before; a pillar with only an
+		// items signal (no plan tasks) is driven entirely by solved problems.
+		coverage := blendCoverage(a)
 		// confidence_p = (avg_rating - 1) / 4, mapping [1..5] → [0..1].
 		var confidence float64
 		avgRating := 0.0
@@ -375,6 +381,34 @@ func (s *Service) todayFor(ctx context.Context, userID uuid.UUID) time.Time {
 	}
 	n := s.now().In(loc)
 	return time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// blendCoverage computes a pillar's coverage breadth [0,1] from up to two
+// signals: plan-task minute coverage (completed/planned est-minutes) and item
+// coverage (problems solved / in-scope problems). Each signal contributes only
+// when its denominator is positive, and the result is the mean of the present
+// signals. With neither present, coverage is 0. This keeps plan-task-only
+// pillars identical to the prior behavior while letting solved problems (written
+// to the progress tables, not plan_tasks) move the needle on their own.
+func blendCoverage(a PillarAggregate) float64 {
+	var sum float64
+	var n int
+	if a.PlannedMinutes > 0 {
+		sum += float64(a.CompletedMinutes) / float64(a.PlannedMinutes)
+		n++
+	}
+	if a.ItemsTotal > 0 {
+		sum += float64(a.ItemsCompleted) / float64(a.ItemsTotal)
+		n++
+	}
+	if n == 0 {
+		return 0
+	}
+	cov := sum / float64(n)
+	if cov > 1 {
+		cov = 1
+	}
+	return cov
 }
 
 func round2(v float64) float64 {

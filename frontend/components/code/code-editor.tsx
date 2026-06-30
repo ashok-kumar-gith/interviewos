@@ -72,6 +72,7 @@ function highlight(src: string, language: EditorLanguage): string {
 }
 
 const OPEN_TO_CLOSE: Record<string, string> = { "(": ")", "[": "]", "{": "}" };
+const CLOSERS = new Set([")", "]", "}"]);
 
 export function CodeEditor({
   value,
@@ -156,6 +157,19 @@ export function CodeEditor({
         const next = value.slice(0, s) + insert + value.slice(en);
         setValueAndCaret(next, s + insert.length);
       }
+      return;
+    }
+
+    // Overtype: typing a closing bracket when the caret already sits right before
+    // that same closer just steps over it (don't insert a duplicate). This is the
+    // counterpart to auto-close — without it, completing an auto-closed pair by
+    // hand produces a doubled closer, e.g. typing "[1]" yields "[1]]".
+    if (CLOSERS.has(e.key) && s === en && value[s] === e.key) {
+      e.preventDefault();
+      // Value is unchanged, so React won't re-render to run the caret effect —
+      // move the caret directly past the existing closer.
+      ta.selectionStart = ta.selectionEnd = s + 1;
+      syncScroll();
       return;
     }
 

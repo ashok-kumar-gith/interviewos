@@ -566,6 +566,60 @@ func computeStreakFromDates(dates []time.Time, asOf time.Time) Streak {
 }
 
 func (r *gormRepository) PillarAggregates(ctx context.Context, userID uuid.UUID) ([]PillarAggregate, error) {
+	// Resolve the user's active roadmap track once; everything below is scoped to
+	// it. No active roadmap ⇒ no pillars (the dashboard renders the onboarding
+	// CTA in that case).
+	type trackRow struct {
+		TrackID uuid.UUID `gorm:"column:track_id"`
+	}
+	var tr trackRow
+	if err := r.db.WithContext(ctx).Table("roadmaps").
+		Select("track_id").
+		Where("user_id = ? AND is_active AND deleted_at IS NULL", userID).
+		Limit(1).Scan(&tr).Error; err != nil {
+		return nil, err
+	}
+	if tr.TrackID == uuid.Nil {
+		return nil, nil
+	}
+
+	// Seed the aggregate map from the track's pillars so EVERY pillar the track
+	// defines appears on the dashboard — including lld/behavioral/resume which may
+	// have no plan_tasks yet (they'd otherwise be silently dropped by a GROUP BY
+	// on plan_tasks.pillar_type). Order is preserved for a stable dashboard.
+	type pRow struct {
+		Type   string  `gorm:"column:type"`
+		Weight float64 `gorm:"column:weight"`
+	}
+	var pillars []pRow
+	if err := r.db.WithContext(ctx).Table("pillars").
+		Select("type, weight").
+		Where("track_id = ? AND deleted_at IS NULL", tr.TrackID).
+		Order("weight DESC, type ASC").Scan(&pillars).Error; err != nil {
+		return nil, err
+	}
+	order := make([]string, 0, len(pillars))
+	byPillar := map[string]*PillarAggregate{}
+	for _, p := range pillars {
+		w := p.Weight
+		if w == 0 {
+			w = 1.0
+		}
+		byPillar[p.Type] = &PillarAggregate{Pillar: p.Type, Weight: w}
+		order = append(order, p.Type)
+	}
+	// Defensive: if a pillar shows up below (plan_task/progress) that the pillars
+	// table did not define, ensure it still surfaces rather than being dropped.
+	ensure := func(pillar string) *PillarAggregate {
+		agg, ok := byPillar[pillar]
+		if !ok {
+			agg = &PillarAggregate{Pillar: pillar, Weight: 1.0}
+			byPillar[pillar] = agg
+			order = append(order, pillar)
+		}
+		return agg
+	}
+
 	// Coverage from the active roadmap's plan_tasks: planned vs. completed
 	// est-minutes per pillar (revise tasks excluded — they are not "new coverage").
 	type covRow struct {
@@ -578,10 +632,14 @@ func (r *gormRepository) PillarAggregates(ctx context.Context, userID uuid.UUID)
 		Select(`pt.pillar_type AS pillar_type,
 		        SUM(pt.estimated_minutes) AS planned,
 		        SUM(CASE WHEN pt.status = 'completed' THEN pt.estimated_minutes ELSE 0 END) AS completed`).
-		Joins("JOIN roadmaps r ON r.id = (SELECT roadmaps.id FROM roadmaps WHERE roadmaps.user_id = pt.user_id AND roadmaps.is_active AND roadmaps.deleted_at IS NULL LIMIT 1)").
 		Where("pt.user_id = ? AND pt.deleted_at IS NULL AND pt.kind <> 'revise'", userID).
 		Group("pt.pillar_type").Scan(&cov).Error; err != nil {
 		return nil, err
+	}
+	for _, c := range cov {
+		agg := ensure(c.PillarType)
+		agg.PlannedMinutes = c.Planned
+		agg.CompletedMinutes = c.Completed
 	}
 
 	// Average confidence per pillar from completed plan_tasks (the per-pillar
@@ -598,44 +656,108 @@ func (r *gormRepository) PillarAggregates(ctx context.Context, userID uuid.UUID)
 		Group("pt.pillar_type").Scan(&conf).Error; err != nil {
 		return nil, err
 	}
-	confByPillar := map[string]confRow{}
 	for _, c := range conf {
-		confByPillar[c.PillarType] = c
+		agg := ensure(c.PillarType)
+		agg.ConfidenceSum += c.Sum
+		agg.ConfidenceCount += c.Cnt
 	}
 
-	// Pillar weights for the user's active roadmap track.
-	type wRow struct {
-		Type   string  `gorm:"column:type"`
-		Weight float64 `gorm:"column:weight"`
+	// --- "Items completed" signals from the problem-progress tables ---
+	// These make solving a problem on the detail page (which writes the progress
+	// table, NOT a plan_task) visibly move the pillar's readiness. The items
+	// coverage is blended with plan-task minute coverage in the service.
+	//
+	// LLD (lld pillar): there is no per-user LLD progress table at GA — LLD
+	// problems are completed only via plan_tasks (item_type='lld_problem'), which
+	// the plan-task coverage above already captures. So there is no separate
+	// items signal to wire for LLD; behavioral/resume likewise have none.
+
+	// DSA: solved problems in the user's track vs. total track problems.
+	type dsaRow struct {
+		Total  int `gorm:"column:total"`
+		Solved int `gorm:"column:solved"`
 	}
-	var weights []wRow
-	if err := r.db.WithContext(ctx).Table("pillars p").
-		Select("p.type AS type, p.weight AS weight").
-		Joins("JOIN roadmaps r ON r.track_id = p.track_id AND r.user_id = ? AND r.is_active AND r.deleted_at IS NULL", userID).
-		Where("p.deleted_at IS NULL").Scan(&weights).Error; err != nil {
+	var dsa dsaRow
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT
+		  (SELECT COUNT(*) FROM problems
+		     WHERE track_id = ? AND deleted_at IS NULL) AS total,
+		  (SELECT COUNT(*) FROM user_problem_progress upp
+		     JOIN problems p ON p.id = upp.problem_id
+		    WHERE upp.user_id = ? AND upp.solved = true
+		      AND upp.deleted_at IS NULL AND p.deleted_at IS NULL
+		      AND p.track_id = ?) AS solved`,
+		tr.TrackID, userID, tr.TrackID).Scan(&dsa).Error; err != nil {
 		return nil, err
 	}
-	weightByPillar := map[string]float64{}
-	for _, w := range weights {
-		weightByPillar[w.Type] = w.Weight
+	if dsa.Total > 0 {
+		agg := ensure("dsa")
+		agg.ItemsTotal = dsa.Total
+		agg.ItemsCompleted = dsa.Solved
+	}
+	// Confidence from solved DSA problems feeds the pillar confidence too.
+	type confItemRow struct {
+		Sum int `gorm:"column:sum"`
+		Cnt int `gorm:"column:cnt"`
+	}
+	var dsaConf confItemRow
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT COALESCE(SUM(upp.confidence),0) AS sum, COUNT(upp.confidence) AS cnt
+		  FROM user_problem_progress upp
+		  JOIN problems p ON p.id = upp.problem_id
+		 WHERE upp.user_id = ? AND upp.solved = true AND upp.confidence IS NOT NULL
+		   AND upp.deleted_at IS NULL AND p.deleted_at IS NULL AND p.track_id = ?`,
+		userID, tr.TrackID).Scan(&dsaConf).Error; err != nil {
+		return nil, err
+	}
+	if dsaConf.Cnt > 0 {
+		agg := ensure("dsa")
+		agg.ConfidenceSum += dsaConf.Sum
+		agg.ConfidenceCount += dsaConf.Cnt
 	}
 
-	out := make([]PillarAggregate, 0, len(cov))
-	for _, c := range cov {
-		agg := PillarAggregate{
-			Pillar:           c.PillarType,
-			Weight:           weightByPillar[c.PillarType],
-			PlannedMinutes:   c.Planned,
-			CompletedMinutes: c.Completed,
-		}
-		if agg.Weight == 0 {
-			agg.Weight = 1.0
-		}
-		if cf, ok := confByPillar[c.PillarType]; ok {
-			agg.ConfidenceSum = cf.Sum
-			agg.ConfidenceCount = cf.Cnt
-		}
-		out = append(out, agg)
+	// System Design: completed HLD design problems in the track vs. total.
+	type sdRow struct {
+		Total     int `gorm:"column:total"`
+		Completed int `gorm:"column:completed"`
+	}
+	var sd sdRow
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT
+		  (SELECT COUNT(*) FROM design_problems
+		     WHERE track_id = ? AND deleted_at IS NULL) AS total,
+		  (SELECT COUNT(*) FROM user_design_problem_progress udpp
+		     JOIN design_problems dp ON dp.id = udpp.design_problem_id
+		    WHERE udpp.user_id = ? AND udpp.status = 'completed'
+		      AND udpp.deleted_at IS NULL AND dp.deleted_at IS NULL
+		      AND dp.track_id = ?) AS completed`,
+		tr.TrackID, userID, tr.TrackID).Scan(&sd).Error; err != nil {
+		return nil, err
+	}
+	if sd.Total > 0 {
+		agg := ensure("system_design")
+		agg.ItemsTotal = sd.Total
+		agg.ItemsCompleted = sd.Completed
+	}
+	var sdConf confItemRow
+	if err := r.db.WithContext(ctx).Raw(`
+		SELECT COALESCE(SUM(udpp.confidence),0) AS sum, COUNT(udpp.confidence) AS cnt
+		  FROM user_design_problem_progress udpp
+		  JOIN design_problems dp ON dp.id = udpp.design_problem_id
+		 WHERE udpp.user_id = ? AND udpp.status = 'completed' AND udpp.confidence IS NOT NULL
+		   AND udpp.deleted_at IS NULL AND dp.deleted_at IS NULL AND dp.track_id = ?`,
+		userID, tr.TrackID).Scan(&sdConf).Error; err != nil {
+		return nil, err
+	}
+	if sdConf.Cnt > 0 {
+		agg := ensure("system_design")
+		agg.ConfidenceSum += sdConf.Sum
+		agg.ConfidenceCount += sdConf.Cnt
+	}
+
+	out := make([]PillarAggregate, 0, len(order))
+	for _, pillar := range order {
+		out = append(out, *byPillar[pillar])
 	}
 	return out, nil
 }
