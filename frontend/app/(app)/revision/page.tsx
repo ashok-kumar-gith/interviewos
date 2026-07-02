@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, Check, RefreshCw, X } from "lucide-react";
+import { ArrowUpRight, Brain, Check, RefreshCw, X } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -16,6 +17,9 @@ import {
   type RevisionItem,
 } from "@/lib/api/revision";
 import { pillarLabel } from "@/lib/pillar-meta";
+import { taskItemHref, itemTypeLabel } from "@/lib/task-href";
+import type { PlanItemType } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 
 const REVISION_DUE_KEY = ["revision", "due"] as const;
 const DASHBOARD_KEY = ["dashboard"] as const;
@@ -86,13 +90,30 @@ export default function RevisionPage() {
           {items.map((item) => {
             const pending =
               recallMutation.isPending && recallMutation.variables?.id === item.id;
+            // Resolve the in-app detail route for the underlying item so the user
+            // can open the actual question/resource (with its external link) before
+            // grading recall — reuses the same polymorphic mapping as plan tasks.
+            const href = taskItemHref(item.item_type as PlanItemType, item.item_id);
             return (
               <li key={item.id}>
                 <Card>
                   <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium leading-snug">{itemTitle(item)}</p>
+                      {href ? (
+                        <Link
+                          href={href}
+                          className="inline-flex items-center gap-1 font-medium leading-snug hover:text-primary hover:underline"
+                        >
+                          {itemTitle(item)}
+                          <ArrowUpRight className="size-3.5 opacity-60" aria-hidden />
+                        </Link>
+                      ) : (
+                        <p className="font-medium leading-snug">{itemTitle(item)}</p>
+                      )}
                       <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-2xs uppercase tracking-wide">
+                          {itemTypeLabel(item.item_type as PlanItemType)}
+                        </span>
                         <span>{pillarLabel(item.pillar_type)}</span>
                         <span aria-hidden>&middot;</span>
                         <span>
@@ -107,6 +128,15 @@ export default function RevisionPage() {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
+                      {href && (
+                        <Link
+                          href={href}
+                          className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+                          aria-label={`Review ${itemTitle(item)}`}
+                        >
+                          Review
+                        </Link>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
