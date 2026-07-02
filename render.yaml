@@ -1,0 +1,51 @@
+# Render Blueprint — free-tier hosting for the InterviewOS backend (Go/Gin, Docker).
+#
+# Postgres is NOT hosted here: create a free Neon database (https://neon.tech) and
+# paste its connection string into DATABASE_URL in the Render dashboard.
+#
+# One-time DB setup, run from your machine against the Neon URL (Render free tier
+# has no shell/jobs, so migrate+seed run locally against the same DB):
+#   cd backend
+#   DATABASE_URL="<neon-url>" go run ./cmd/migrate up
+#   DATABASE_URL="<neon-url>" go run ./cmd/seed
+#   # optional: load your imported questions
+#   python3 scripts/import_questions.py "<file.xlsx>" | psql "<neon-url>"
+#
+# The frontend is deployed separately on Vercel (see docs/DEPLOY-FREE.md) and proxies
+# /api/* to this service via frontend/vercel.json — so the app is same-origin (no CORS
+# or cross-site-cookie issues). CODE_RUNNER_ENABLED is intentionally omitted (stays OFF)
+# because it executes arbitrary code with server privileges — never enable on a public host.
+services:
+  - type: web
+    name: interviewos-api
+    runtime: docker
+    repo: https://github.com/ashok-kumar-gith/interviewos
+    branch: main
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /healthz # liveness only — no DB/Redis dependency, so a hiccup won't flap the service
+    envVars:
+      - key: ENV
+        value: production # enables Secure cookies + JSON logs
+      - key: LOG_LEVEL
+        value: info
+      - key: JWT_SECRET
+        generateValue: true # Render generates a strong random secret
+      - key: DATABASE_URL
+        sync: false # set in dashboard to your Neon URL (append ?sslmode=require)
+      - key: CORS_ORIGINS
+        sync: false # set to your Vercel URL, e.g. https://interviewos.vercel.app (belt-and-suspenders; the proxy makes it same-origin)
+      - key: AI_ENABLED
+        value: "false" # no ANTHROPIC_API_KEY → AI features use the deterministic fallback
+      - key: ACCESS_TOKEN_TTL
+        value: 15m
+      - key: REFRESH_TOKEN_TTL
+        value: 720h
+      - key: RESET_TOKEN_TTL
+        value: 1h
+    # Note: do NOT set PORT — Render injects it and the app binds to it automatically.
+    # REDIS_URL is omitted; the backend degrades gracefully (rate-limit falls back to
+    # in-memory; sessions/refresh tokens live in Postgres). Add Upstash later if desired.

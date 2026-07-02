@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://REPLACE_WITH_RENDER_HOST/api/:path*" },
+    { "source": "/healthz", "destination": "https://REPLACE_WITH_RENDER_HOST/healthz" },
+    { "source": "/readyz", "destination": "https://REPLACE_WITH_RENDER_HOST/readyz" },
+    { "source": "/swagger", "destination": "https://REPLACE_WITH_RENDER_HOST/swagger" },
+    { "source": "/swagger/:path*", "destination": "https://REPLACE_WITH_RENDER_HOST/swagger/:path*" },
+    { "source": "/metrics", "destination": "https://REPLACE_WITH_RENDER_HOST/metrics" }
+  ]
+}

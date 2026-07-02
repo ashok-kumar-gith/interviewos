@@ -9,10 +9,15 @@
  *     error:   { "error": { code, message, details?, request_id } }
  */
 
-const API_ROOT = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080").replace(
-  /\/$/,
-  "",
-);
+// Resolve the API root. Precedence:
+//  1. NEXT_PUBLIC_API_BASE_URL — explicit (local dev sets http://localhost:8080).
+//  2. In the browser with no env set — the current origin, so a same-origin deploy
+//     (e.g. Vercel rewriting /api/* to the backend) works with no CORS/cookie fuss.
+//  3. SSR fallback — localhost (client pages fetch on the client, where window exists).
+const API_ROOT = (
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  (typeof window !== "undefined" ? window.location.origin : "http://localhost:8080")
+).replace(/\/+$/, "");
 const API_BASE = `${API_ROOT}/api/v1`;
 
 /** Canonical error codes from pkg/apierror (ARCHITECTURE §13). */
