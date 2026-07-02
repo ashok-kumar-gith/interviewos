@@ -31,8 +31,8 @@ import {
 } from "@/lib/api/content";
 import type { Difficulty } from "@/lib/api/types";
 import { listProblemProgress } from "@/lib/api/dsaprogress";
+import { PAGE_SIZE } from "@/lib/config";
 
-const PAGE_SIZE = 20;
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 
 export default function ProblemsPage() {

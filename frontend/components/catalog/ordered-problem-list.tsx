@@ -15,8 +15,8 @@ import { DifficultyPill } from "@/components/ui/difficulty-pill";
 import { PaginationBar } from "@/components/catalog/pagination-bar";
 import type { ListResult } from "@/lib/api/content";
 import type { Difficulty } from "@/lib/api/types";
+import { PAGE_SIZE } from "@/lib/config";
 
-const PAGE_SIZE = 20;
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 
 interface OrderedProblem {

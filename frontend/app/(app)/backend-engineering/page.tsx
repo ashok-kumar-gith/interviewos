@@ -28,8 +28,8 @@ import {
   type Topic,
 } from "@/lib/api/content";
 import type { Difficulty, Priority } from "@/lib/api/types";
+import { PAGE_SIZE } from "@/lib/config";
 
-const PAGE_SIZE = 20;
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
 const PRIORITIES: Priority[] = ["low", "medium", "high", "critical"];
 

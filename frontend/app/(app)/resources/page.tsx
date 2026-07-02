@@ -13,8 +13,7 @@ import { ResourceRow } from "@/components/catalog/resource-row";
 import { PaginationBar } from "@/components/catalog/pagination-bar";
 import { listResources, type ListResult, type Resource } from "@/lib/api/content";
 import type { Difficulty, ResourceType } from "@/lib/api/types";
-
-const PAGE_SIZE = 20;
+import { PAGE_SIZE } from "@/lib/config";
 
 const TYPES: { value: ResourceType; label: string }[] = [
   { value: "book", label: "Book" },
