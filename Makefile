@@ -50,6 +50,21 @@ migrate: ## Run database migrations
 seed: ## Load curriculum seed data (DSA + System Design)
 	cd $(BACKEND) && go run ./cmd/seed
 
+# Connection string for admin/one-off psql tasks. Defaults to the local dev stack
+# (scripts/dev-local.sh) and can be overridden: make grant-admin EMAIL=x DATABASE_URL=...
+DATABASE_URL ?= postgres://interviewos@127.0.0.1:5433/interviewos?sslmode=disable
+PSQL ?= psql
+
+.PHONY: grant-admin
+grant-admin: ## Promote a user to admin by email: make grant-admin EMAIL=user@example.com
+	@if [ -z "$(EMAIL)" ]; then echo "usage: make grant-admin EMAIL=user@example.com"; exit 1; fi
+	$(PSQL) "$(DATABASE_URL)" -c "UPDATE users SET role='admin', updated_at=now() WHERE lower(email)=lower('$(EMAIL)');" -c "SELECT email, role FROM users WHERE lower(email)=lower('$(EMAIL)');"
+
+.PHONY: revoke-admin
+revoke-admin: ## Demote an admin back to a regular user: make revoke-admin EMAIL=user@example.com
+	@if [ -z "$(EMAIL)" ]; then echo "usage: make revoke-admin EMAIL=user@example.com"; exit 1; fi
+	$(PSQL) "$(DATABASE_URL)" -c "UPDATE users SET role='user', updated_at=now() WHERE lower(email)=lower('$(EMAIL)');" -c "SELECT email, role FROM users WHERE lower(email)=lower('$(EMAIL)');"
+
 ## ---------- Backend ----------
 .PHONY: be-build
 be-build: ## Build the Go backend

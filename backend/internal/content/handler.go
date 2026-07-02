@@ -153,13 +153,13 @@ func (h *Handler) ListProblems(c *gin.Context) {
 	page, pageSize := parsePagination(c)
 	filters := parseFilter(c.Query("filter"))
 	f := ProblemFilter{
-		Difficulty:  difficultyParam(firstNonEmpty(c.Query("difficulty"), filters["difficulty"])),
-		PatternID:   firstUUID(queryUUID(c, "pattern_id"), filterUUID(filters, "pattern")),
-		TopicID:     queryUUID(c, "topic_id"),
-		CompanyID:   firstUUID(queryUUID(c, "company_id"), filterUUID(filters, "company")),
-		Source:      sourceParam(firstNonEmpty(c.Query("source"), filters["source"])),
-		Query:       c.Query("q"),
-		Sort:        parseSort(c.Query("sort"), problemSortable),
+		Difficulty: difficultyParam(firstNonEmpty(c.Query("difficulty"), filters["difficulty"])),
+		PatternID:  firstUUID(queryUUID(c, "pattern_id"), filterUUID(filters, "pattern")),
+		TopicID:    queryUUID(c, "topic_id"),
+		CompanyID:  firstUUID(queryUUID(c, "company_id"), filterUUID(filters, "company")),
+		Source:     sourceParam(firstNonEmpty(c.Query("source"), filters["source"])),
+		Query:      c.Query("q"),
+		Sort:       parseSort(c.Query("sort"), problemSortable),
 	}
 	// A non-UUID filter value (e.g. company:amazon, pattern:two-pointers) is
 	// treated as a slug.

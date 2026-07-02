@@ -19,6 +19,7 @@ type Repository interface {
 	GetUserByID(ctx context.Context, id uuid.UUID) (*User, error)
 	UpdateLastLogin(ctx context.Context, id uuid.UUID, at time.Time) error
 	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
+	SetRoleByEmail(ctx context.Context, email string, role Role) error
 
 	// Refresh tokens.
 	CreateRefreshToken(ctx context.Context, t *RefreshToken) error
@@ -86,6 +87,21 @@ func (r *gormRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passw
 	return r.db.WithContext(ctx).Model(&User{}).
 		Where("id = ?", id).
 		Update("password_hash", passwordHash).Error
+}
+
+// SetRoleByEmail promotes/demotes an account by email (used by the operational
+// grant-admin flow). Returns ErrUserNotFound when no active account matches.
+func (r *gormRepository) SetRoleByEmail(ctx context.Context, email string, role Role) error {
+	res := r.db.WithContext(ctx).Model(&User{}).
+		Where("lower(email) = lower(?)", normalizeEmail(email)).
+		Update("role", role)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrUserNotFound
+	}
+	return nil
 }
 
 func (r *gormRepository) CreateRefreshToken(ctx context.Context, t *RefreshToken) error {

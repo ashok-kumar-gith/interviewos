@@ -87,6 +87,15 @@ func (f *fakeRepository) UpdatePassword(_ context.Context, id uuid.UUID, hash st
 	return nil
 }
 
+func (f *fakeRepository) SetRoleByEmail(_ context.Context, email string, role Role) error {
+	id, ok := f.usersByEmail[email]
+	if !ok {
+		return ErrUserNotFound
+	}
+	f.users[id].Role = role
+	return nil
+}
+
 func (f *fakeRepository) CreateRefreshToken(_ context.Context, t *RefreshToken) error {
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()

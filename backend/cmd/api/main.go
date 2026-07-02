@@ -118,8 +118,18 @@ func run() error {
 		// is shared with the Backend Engineering module below (which reuses it
 		// rather than duplicating read logic).
 		contentRepo := content.NewRepository(db)
+		contentSvc := content.NewService(contentRepo)
 		registrars = append(registrars,
-			content.NewHandler(content.NewService(contentRepo)))
+			content.NewHandler(contentSvc))
+
+		// Admin content authoring (DSA problems + topics), gated by RequireAdmin.
+		// Reuses the shared content repository's write surface (join tables handled
+		// transactionally).
+		registrars = append(registrars,
+			content.NewAdminHandler(
+				content.NewAdminService(content.NewWriteRepository(db)),
+				tokens,
+			))
 
 		// Backend Engineering depth catalog — read-only, public. Serves the
 		// dedicated /backend-engineering/topics path over the shared content repo,
@@ -225,6 +235,13 @@ func run() error {
 				tokens,
 			))
 
+		// Admin design-problems (HLD) authoring, gated by RequireAdmin.
+		registrars = append(registrars,
+			designproblems.NewAdminHandler(
+				designproblems.NewAdminService(designproblems.NewWriteRepository(db)),
+				tokens,
+			))
+
 		// DSA problem progress + stored solutions (user-scoped): mark solved, when,
 		// and save the solution code/language/notes. Companion to the public
 		// /problems catalog (internal/content), mirroring designproblems progress.
@@ -234,6 +251,13 @@ func run() error {
 		// LLD problems catalog — read-only, public.
 		registrars = append(registrars,
 			lld.NewHandler(lld.NewService(lld.NewRepository(db))))
+
+		// Admin LLD authoring, gated by RequireAdmin.
+		registrars = append(registrars,
+			lld.NewAdminHandler(
+				lld.NewAdminService(lld.NewWriteRepository(db)),
+				tokens,
+			))
 
 		// Mock Interview module (user-scoped). On a finding with
 		// create_remediation_task, the remediation planner schedules a follow-up

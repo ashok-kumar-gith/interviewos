@@ -53,12 +53,12 @@ func (a *JSONArray) Scan(src any) error {
 type PillarType string
 
 const (
-	PillarDSA         PillarType = "dsa"
-	PillarSystem      PillarType = "system_design"
-	PillarLLD         PillarType = "lld"
-	PillarBackendEng  PillarType = "backend_engineering"
-	PillarBehavioral  PillarType = "behavioral"
-	PillarResume      PillarType = "resume"
+	PillarDSA        PillarType = "dsa"
+	PillarSystem     PillarType = "system_design"
+	PillarLLD        PillarType = "lld"
+	PillarBackendEng PillarType = "backend_engineering"
+	PillarBehavioral PillarType = "behavioral"
+	PillarResume     PillarType = "resume"
 )
 
 // ResourceType enumerates the resource_type Postgres enum.
@@ -118,23 +118,23 @@ func (Pillar) TableName() string { return "pillars" }
 
 // Topic is a learning topic within a pillar (table: topics).
 type Topic struct {
-	ID                 uuid.UUID      `gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
-	PillarID           uuid.UUID      `gorm:"column:pillar_id;type:uuid;not null"`
-	TrackID            uuid.UUID      `gorm:"column:track_id;type:uuid;not null"`
-	Slug               string         `gorm:"column:slug;not null"`
-	Name               string         `gorm:"column:name;not null"`
-	Summary            *string        `gorm:"column:summary"`
-	ConceptMD          *string        `gorm:"column:concept_md"`
-	Difficulty         Difficulty     `gorm:"column:difficulty;type:difficulty;not null;default:medium"`
-	Priority           Priority       `gorm:"column:priority;type:priority;not null;default:medium"`
-	EstimatedHours     float64        `gorm:"column:estimated_hours;type:numeric(5,2);not null;default:2.0"`
-	CommonMistakes     *string        `gorm:"column:common_mistakes"`
-	ExpectedQuestions  JSONArray      `gorm:"column:expected_questions;type:jsonb;not null;default:'[]'"`
-	Prerequisites      JSONArray      `gorm:"column:prerequisites;type:jsonb;not null;default:'[]'"`
-	SortOrder          int            `gorm:"column:sort_order;not null;default:0"`
-	CreatedAt          time.Time      `gorm:"column:created_at;not null;default:now()"`
-	UpdatedAt          time.Time      `gorm:"column:updated_at;not null;default:now()"`
-	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at;index"`
+	ID                uuid.UUID      `gorm:"column:id;type:uuid;default:gen_random_uuid();primaryKey"`
+	PillarID          uuid.UUID      `gorm:"column:pillar_id;type:uuid;not null"`
+	TrackID           uuid.UUID      `gorm:"column:track_id;type:uuid;not null"`
+	Slug              string         `gorm:"column:slug;not null"`
+	Name              string         `gorm:"column:name;not null"`
+	Summary           *string        `gorm:"column:summary"`
+	ConceptMD         *string        `gorm:"column:concept_md"`
+	Difficulty        Difficulty     `gorm:"column:difficulty;type:difficulty;not null;default:medium"`
+	Priority          Priority       `gorm:"column:priority;type:priority;not null;default:medium"`
+	EstimatedHours    float64        `gorm:"column:estimated_hours;type:numeric(5,2);not null;default:2.0"`
+	CommonMistakes    *string        `gorm:"column:common_mistakes"`
+	ExpectedQuestions JSONArray      `gorm:"column:expected_questions;type:jsonb;not null;default:'[]'"`
+	Prerequisites     JSONArray      `gorm:"column:prerequisites;type:jsonb;not null;default:'[]'"`
+	SortOrder         int            `gorm:"column:sort_order;not null;default:0"`
+	CreatedAt         time.Time      `gorm:"column:created_at;not null;default:now()"`
+	UpdatedAt         time.Time      `gorm:"column:updated_at;not null;default:now()"`
+	DeletedAt         gorm.DeletedAt `gorm:"column:deleted_at;index"`
 }
 
 // TableName pins the table name for GORM.

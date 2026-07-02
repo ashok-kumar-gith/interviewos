@@ -88,6 +88,38 @@ func RequireRole(roles ...Role) gin.HandlerFunc {
 	}
 }
 
+// RequireAdmin returns middleware enforcing that the authenticated principal has
+// the admin role. It must run AFTER RequireAuth (which loads the role from the
+// validated access-token claims into the context). A missing principal yields a
+// 401; a non-admin principal yields a 403 FORBIDDEN. It is a thin convenience
+// wrapper over RequireRole(RoleAdmin) for the content-authoring endpoints.
+func RequireAdmin(tokens *TokenManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, ok := bearerToken(c)
+		if !ok {
+			server.AbortError(c, 401, server.CodeUnauthenticated, "missing or malformed authorization header", nil)
+			return
+		}
+		claims, err := tokens.ParseAccessToken(raw)
+		if err != nil {
+			server.AbortError(c, 401, server.CodeUnauthenticated, "invalid or expired access token", nil)
+			return
+		}
+		uid, err := UserIDFromClaims(claims)
+		if err != nil {
+			server.AbortError(c, 401, server.CodeUnauthenticated, "invalid token subject", nil)
+			return
+		}
+		if claims.Role != RoleAdmin {
+			server.AbortError(c, 403, server.CodeForbidden, "admin role required", nil)
+			return
+		}
+		c.Set(ctxUserIDKey, uid)
+		c.Set(ctxRoleKey, claims.Role)
+		c.Next()
+	}
+}
+
 // UserIDFromContext returns the authenticated user id set by RequireAuth.
 func UserIDFromContext(c *gin.Context) (uuid.UUID, bool) {
 	v, ok := c.Get(ctxUserIDKey)

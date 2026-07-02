@@ -539,6 +539,28 @@ paths:
                     properties:
                       data: { type: array, items: { $ref: '#/components/schemas/Topic' } }
 
+    post:
+      tags: [Content]
+      summary: Create a topic under a pillar (admin)
+      operationId: createTopic
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TopicWrite' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopicDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /topics/{topicId}:
     get:
       tags: [Content]
@@ -552,6 +574,42 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/TopicDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Content]
+      summary: Update a topic (admin)
+      operationId: updateTopic
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: topicId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TopicWrite' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TopicDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Content]
+      summary: Soft-delete a topic (admin)
+      operationId: deleteTopic
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: topicId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /resources:
@@ -608,6 +666,28 @@ paths:
                     properties:
                       data: { type: array, items: { $ref: '#/components/schemas/Problem' } }
 
+    post:
+      tags: [DSA]
+      summary: Create a DSA problem (admin)
+      operationId: createProblem
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProblemWrite' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /problems/{problemId}:
     get:
       tags: [DSA]
@@ -621,6 +701,42 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [DSA]
+      summary: Update a DSA problem, re-setting patterns/sources/frequencies (admin)
+      operationId: updateProblem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: problemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProblemWrite' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [DSA]
+      summary: Soft-delete a DSA problem (admin)
+      operationId: deleteProblem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: problemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /patterns:
@@ -670,6 +786,28 @@ paths:
                     properties:
                       data: { type: array, items: { $ref: '#/components/schemas/DesignProblem' } }
 
+    post:
+      tags: [SystemDesign]
+      summary: Create an HLD design problem (admin)
+      operationId: createDesignProblem
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DesignProblemWrite' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignProblemDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /design-problems/{designProblemId}:
     get:
       tags: [SystemDesign]
@@ -683,6 +821,42 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DesignProblemDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [SystemDesign]
+      summary: Update an HLD design problem (admin)
+      operationId: updateDesignProblem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: designProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DesignProblemWrite' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DesignProblemDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [SystemDesign]
+      summary: Soft-delete an HLD design problem (admin)
+      operationId: deleteDesignProblem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: designProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /design-problems/{designProblemId}/progress:
@@ -861,6 +1035,28 @@ paths:
                     properties:
                       data: { type: array, items: { $ref: '#/components/schemas/LLDProblem' } }
 
+    post:
+      tags: [LLD]
+      summary: Create an LLD problem (admin)
+      operationId: createLLDProblem
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LLDProblemWrite' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LLDProblemDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /lld-problems/{lldProblemId}:
     get:
       tags: [LLD]
@@ -874,6 +1070,42 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/LLDProblemDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [LLD]
+      summary: Update an LLD problem (admin)
+      operationId: updateLLDProblem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: lldProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LLDProblemWrite' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LLDProblemDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [LLD]
+      summary: Soft-delete an LLD problem (admin)
+      operationId: deleteLLDProblem
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: lldProblemId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ---------------- BEHAVIORAL ----------------
@@ -1583,6 +1815,94 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/ErrorEnvelope' } } }
 
   schemas:
+    ProblemCompanyFrequencyWrite:
+      type: object
+      required: [frequency]
+      properties:
+        company_id: { type: string, format: uuid, nullable: true, description: Company by id (or use company_slug) }
+        company_slug: { type: string, description: Company by slug (alternative to company_id) }
+        frequency: { type: number, format: double }
+        last_seen_period: { type: string, nullable: true }
+    ProblemWrite:
+      type: object
+      required: [slug, title, difficulty]
+      properties:
+        track_id: { type: string, format: uuid, nullable: true, description: Defaults to the primary track }
+        topic_id: { type: string, format: uuid, nullable: true }
+        slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        platform: { $ref: '#/components/schemas/ProblemPlatform' }
+        external_id: { type: string, nullable: true }
+        url: { type: string, nullable: true }
+        prompt_summary: { type: string, nullable: true }
+        approach_md: { type: string, nullable: true }
+        common_mistakes: { type: string, nullable: true }
+        estimated_minutes: { type: integer, nullable: true }
+        frequency_score: { type: number, format: double, nullable: true }
+        is_premium: { type: boolean, nullable: true }
+        pattern_slugs: { type: array, items: { type: string } }
+        sources: { type: array, items: { $ref: '#/components/schemas/ProblemSourceName' } }
+        company_frequency: { type: array, items: { $ref: '#/components/schemas/ProblemCompanyFrequencyWrite' } }
+    TopicWrite:
+      type: object
+      required: [slug, name]
+      properties:
+        pillar_id: { type: string, format: uuid, nullable: true, description: Pillar by id (or use pillar_type) }
+        pillar_type: { $ref: '#/components/schemas/PillarType' }
+        track_id: { type: string, format: uuid, nullable: true, description: Defaults to the pillar's track }
+        slug: { type: string }
+        name: { type: string }
+        summary: { type: string, nullable: true }
+        concept_md: { type: string, nullable: true }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        priority: { $ref: '#/components/schemas/Priority' }
+        estimated_hours: { type: number, format: double, nullable: true }
+        common_mistakes: { type: string, nullable: true }
+        expected_questions: { type: array, items: { type: string } }
+        prerequisites: { type: array, items: { type: string } }
+        sort_order: { type: integer, nullable: true }
+    DesignProblemWrite:
+      type: object
+      required: [slug, title, difficulty]
+      properties:
+        track_id: { type: string, format: uuid, nullable: true, description: Defaults to the primary track }
+        pillar_id: { type: string, format: uuid, nullable: true }
+        slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        order_index: { type: integer, nullable: true }
+        requirements_md: { type: string, nullable: true }
+        capacity_estimation_md: { type: string, nullable: true }
+        api_design_md: { type: string, nullable: true }
+        data_model_md: { type: string, nullable: true }
+        high_level_design_md: { type: string, nullable: true }
+        caching_md: { type: string, nullable: true }
+        queueing_md: { type: string, nullable: true }
+        scaling_md: { type: string, nullable: true }
+        tradeoffs_md: { type: string, nullable: true }
+        failure_handling_md: { type: string, nullable: true }
+        alternatives_md: { type: string, nullable: true }
+        interview_tips_md: { type: string, nullable: true }
+        follow_up_questions: { type: array, items: { type: string } }
+    LLDProblemWrite:
+      type: object
+      required: [slug, title, difficulty]
+      properties:
+        track_id: { type: string, format: uuid, nullable: true, description: Defaults to the primary track }
+        pillar_id: { type: string, format: uuid, nullable: true }
+        slug: { type: string }
+        title: { type: string }
+        difficulty: { $ref: '#/components/schemas/Difficulty' }
+        order_index: { type: integer, nullable: true }
+        requirements_md: { type: string, nullable: true }
+        entities_md: { type: string, nullable: true }
+        class_diagram_md: { type: string, nullable: true }
+        design_patterns: { type: array, items: { type: string } }
+        solid_notes_md: { type: string, nullable: true }
+        api_or_interface_md: { type: string, nullable: true }
+        tradeoffs_md: { type: string, nullable: true }
+        follow_up_questions: { type: array, items: { type: string } }
     CodeRunRequest:
       type: object
       required: [language, source]
