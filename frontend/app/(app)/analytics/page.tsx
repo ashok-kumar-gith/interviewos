@@ -43,6 +43,13 @@ import { cn } from "@/lib/utils";
 const retryNon404 = (count: number, error: unknown) =>
   !(error instanceof ApiError && error.status === 404) && count < 1;
 
+/**
+ * The analytics endpoints return 404 ("no profile; complete intake first") until
+ * the user has completed intake. Treat that as an onboarding state, not an error.
+ */
+const isProfileNotFound = (query: { error?: unknown }): boolean =>
+  query.error instanceof ApiError && query.error.status === 404;
+
 function formatDate(iso: string): string {
   const d = new Date(`${iso.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(d.getTime())) return iso;
@@ -77,6 +84,30 @@ export default function AnalyticsPage() {
 
   if (snapshots.isLoading && topics.isLoading && timeSpent.isLoading) {
     return <AnalyticsSkeleton />;
+  }
+
+  // Before intake there is no profile, so every analytics endpoint 404s. Show a
+  // single onboarding CTA instead of three "failed to load" error boxes.
+  const needsIntake =
+    isProfileNotFound(snapshots) || isProfileNotFound(topics) || isProfileNotFound(timeSpent);
+  if (needsIntake) {
+    return (
+      <div className="space-y-8">
+        <header>
+          <h1 className="text-h1">Analytics</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Your readiness trend, topic mastery, and study time.
+          </p>
+        </header>
+        <EmptyState
+          icon={BarChart3}
+          title="Complete your intake to unlock analytics"
+          description="Analytics tracks your readiness, topic mastery, and study time against your personalized roadmap. Take the short intake to generate your plan — this page fills in as you make progress."
+          actionLabel="Start intake"
+          actionHref="/intake"
+        />
+      </div>
+    );
   }
 
   return (
