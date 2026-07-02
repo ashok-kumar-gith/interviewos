@@ -46,7 +46,9 @@ export default function RegisterPage() {
       registerUser({ full_name: values.fullName, email: values.email, password: values.password }),
     onSuccess: (data) => {
       setSession({ accessToken: data.access_token, user: data.user });
-      router.push("/dashboard");
+      // New accounts have no profile/roadmap yet — send them to intake so the
+      // personalized pages (today, roadmap, analytics) have data to show.
+      router.push("/intake");
     },
     onError: (error) => {
       setFormError(authErrorMessage(error, "Couldn't create your account. Try again."));

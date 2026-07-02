@@ -18,6 +18,7 @@ import { ApiError } from "@/lib/api/client";
 import { ProblemProgressPanel } from "@/components/detail/problem-progress";
 import { CodeRunner } from "@/components/code/code-runner";
 import { ProblemAdminActions } from "@/components/authoring/admin-actions";
+import { CODE_RUNNER_ENABLED } from "@/lib/config";
 
 const SOURCE_LABEL: Record<string, string> = {
   blind75: "Blind 75",
@@ -97,9 +98,11 @@ export default function ProblemDetailPage({ params }: { params: Promise<{ id: st
 
       <ProblemProgressPanel problemId={id} />
 
-      <DetailSection title="Run code" icon={Terminal}>
-        <CodeRunner />
-      </DetailSection>
+      {CODE_RUNNER_ENABLED && (
+        <DetailSection title="Run code" icon={Terminal}>
+          <CodeRunner />
+        </DetailSection>
+      )}
 
       <MarkdownSection title="Problem" icon={ListChecks} content={p.prompt_summary} />
       <MarkdownSection title="Approach" icon={Lightbulb} content={p.approach_md} />
