@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { PILLAR_NAV, PRIMARY_NAV, UTILITY_NAV, type NavItem } from "@/lib/nav";
+import { ADMIN_NAV, PILLAR_NAV, PRIMARY_NAV, UTILITY_NAV, type NavItem } from "@/lib/nav";
+import { useIsAdmin } from "@/lib/store/admin";
 import { useUiStore } from "@/lib/store/ui";
 import { cn } from "@/lib/utils";
 
@@ -52,6 +53,7 @@ function NavLink({
 export function Sidebar() {
   const pathname = usePathname();
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
+  const isAdmin = useIsAdmin();
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
@@ -103,6 +105,15 @@ export function Sidebar() {
               active={isActive(item.href)}
             />
           ))}
+          {isAdmin &&
+            ADMIN_NAV.map((item) => (
+              <NavLink
+                key={item.href}
+                item={item}
+                collapsed={collapsed}
+                active={isActive(item.href)}
+              />
+            ))}
         </div>
       </nav>
     </aside>

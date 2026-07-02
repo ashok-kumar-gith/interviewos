@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PaginationBar } from "@/components/catalog/pagination-bar";
+import { NewContentButton } from "@/components/authoring/new-content-button";
 import {
   listCompanies,
   listPatterns,
@@ -114,11 +115,14 @@ export default function ProblemsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-h1">Problems</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Browse the DSA catalog — filter by difficulty, pattern, or company.
-        </p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-h1">Problems</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Browse the DSA catalog — filter by difficulty, pattern, or company.
+          </p>
+        </div>
+        <NewContentButton type="problem" label="New problem" />
       </header>
 
       {/* Filters */}

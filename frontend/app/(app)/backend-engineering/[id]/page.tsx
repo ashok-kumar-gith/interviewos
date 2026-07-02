@@ -17,6 +17,7 @@ import {
 } from "@/components/detail/detail-layout";
 import { getBackendEngineeringTopic, type TopicDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
+import { TopicAdminActions } from "@/components/authoring/admin-actions";
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: "Not started",
@@ -53,7 +54,14 @@ export default function BackendEngineeringTopicDetailPage({
 
   return (
     <article className="space-y-6">
-      <BackLink href="/backend-engineering" label="Back to Backend Engineering" />
+      <div className="flex items-center justify-between gap-3">
+        <BackLink href="/backend-engineering" label="Back to Backend Engineering" />
+        <TopicAdminActions
+          topic={t}
+          queryKey={["backend-engineering-topic", id]}
+          backHref="/backend-engineering"
+        />
+      </div>
 
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">

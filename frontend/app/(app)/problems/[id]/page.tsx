@@ -17,6 +17,7 @@ import { getProblem, type ProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
 import { ProblemProgressPanel } from "@/components/detail/problem-progress";
 import { CodeRunner } from "@/components/code/code-runner";
+import { ProblemAdminActions } from "@/components/authoring/admin-actions";
 
 const SOURCE_LABEL: Record<string, string> = {
   blind75: "Blind 75",
@@ -53,7 +54,10 @@ export default function ProblemDetailPage({ params }: { params: Promise<{ id: st
 
   return (
     <article className="space-y-6">
-      <BackLink href="/problems" label="Back to Problems" />
+      <div className="flex items-center justify-between gap-3">
+        <BackLink href="/problems" label="Back to Problems" />
+        <ProblemAdminActions problem={p} />
+      </div>
 
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">

@@ -29,6 +29,7 @@ import {
 import { getDesignProblem, type DesignProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
 import { DesignProblemProgressCard } from "@/components/detail/design-problem-progress";
+import { DesignProblemAdminActions } from "@/components/authoring/admin-actions";
 
 export default function DesignProblemDetailPage({
   params,
@@ -58,7 +59,10 @@ export default function DesignProblemDetailPage({
 
   return (
     <article className="space-y-6">
-      <BackLink href="/system-design" label="Back to System Design" />
+      <div className="flex items-center justify-between gap-3">
+        <BackLink href="/system-design" label="Back to System Design" />
+        <DesignProblemAdminActions problem={d} />
+      </div>
 
       <header className="space-y-3">
         <DifficultyPill difficulty={d.difficulty} />

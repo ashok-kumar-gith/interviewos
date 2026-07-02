@@ -14,6 +14,7 @@ import {
   Network,
   Server,
   Settings,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 
@@ -58,4 +59,9 @@ export const UTILITY_NAV: NavItem[] = [
   { href: "/revision", label: "Revision", icon: Clock },
   { href: "/mock", label: "Mocks", icon: Mic },
   { href: "/settings", label: "Settings", icon: Settings },
+];
+
+/** Admin-only nav — content authoring. Rendered only when `user.role === "admin"`. */
+export const ADMIN_NAV: NavItem[] = [
+  { href: "/admin/content", label: "Authoring", icon: ShieldCheck },
 ];

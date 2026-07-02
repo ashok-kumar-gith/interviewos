@@ -24,6 +24,7 @@ import {
 } from "@/components/detail/detail-layout";
 import { getLLDProblem, type LLDProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
+import { LLDProblemAdminActions } from "@/components/authoring/admin-actions";
 
 /** Strip a fenced ``` wrapper if the diagram is already fenced. */
 function unfence(md: string): string {
@@ -55,7 +56,10 @@ export default function LLDProblemDetailPage({ params }: { params: Promise<{ id:
 
   return (
     <article className="space-y-6">
-      <BackLink href="/lld" label="Back to LLD" />
+      <div className="flex items-center justify-between gap-3">
+        <BackLink href="/lld" label="Back to LLD" />
+        <LLDProblemAdminActions problem={l} />
+      </div>
 
       <header className="space-y-3">
         <DifficultyPill difficulty={l.difficulty} />

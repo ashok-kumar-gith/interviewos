@@ -9,6 +9,7 @@ import type {
   ConfidenceLevel,
   Difficulty,
   PaginationMeta,
+  PillarType,
   Priority,
   ProblemPlatform,
   ProblemSourceName,
@@ -318,4 +319,86 @@ export interface ResourceFilters {
 /** GET /resources — paginated resource library with type/difficulty filters. */
 export function listResources(filters: ResourceFilters = {}): Promise<ListResult<Resource>> {
   return api.getList<Resource>("/resources", { query: { ...filters } });
+}
+
+/* ==========================================================================
+ * Admin authoring — create / update / delete (admin-only; GET stays public).
+ * Request bodies mirror the *Write schemas in docs/openapi.yaml exactly.
+ * ======================================================================== */
+
+/** A single company-frequency entry on a ProblemWrite (ProblemCompanyFrequencyWrite). */
+export interface ProblemCompanyFrequencyWrite {
+  company_id?: string | null;
+  company_slug?: string;
+  frequency: number;
+  last_seen_period?: string | null;
+}
+
+/** Request body for POST/PUT /problems (schema: ProblemWrite). */
+export interface ProblemWrite {
+  track_id?: string | null;
+  topic_id?: string | null;
+  slug: string;
+  title: string;
+  difficulty: Difficulty;
+  platform?: ProblemPlatform;
+  external_id?: string | null;
+  url?: string | null;
+  prompt_summary?: string | null;
+  approach_md?: string | null;
+  common_mistakes?: string | null;
+  estimated_minutes?: number | null;
+  frequency_score?: number | null;
+  is_premium?: boolean | null;
+  pattern_slugs?: string[];
+  sources?: ProblemSourceName[];
+  company_frequency?: ProblemCompanyFrequencyWrite[];
+}
+
+/** POST /problems — create a DSA problem (admin). Returns the created problem. */
+export function createProblem(body: ProblemWrite): Promise<ProblemDetail> {
+  return api.post<ProblemDetail>("/problems", body);
+}
+
+/** PUT /problems/{id} — replace a DSA problem (admin). */
+export function updateProblem(id: string, body: ProblemWrite): Promise<ProblemDetail> {
+  return api.put<ProblemDetail>(`/problems/${id}`, body);
+}
+
+/** DELETE /problems/{id} — delete a DSA problem (admin; 204). */
+export function deleteProblem(id: string): Promise<void> {
+  return api.delete<void>(`/problems/${id}`);
+}
+
+/** Request body for POST/PUT /topics (schema: TopicWrite). */
+export interface TopicWrite {
+  pillar_id?: string | null;
+  pillar_type?: PillarType;
+  track_id?: string | null;
+  slug: string;
+  name: string;
+  summary?: string | null;
+  concept_md?: string | null;
+  difficulty?: Difficulty;
+  priority?: Priority;
+  estimated_hours?: number | null;
+  common_mistakes?: string | null;
+  expected_questions?: string[];
+  prerequisites?: string[];
+  sort_order?: number | null;
+}
+
+/** POST /topics — create a topic under a pillar (admin). */
+export function createTopic(body: TopicWrite): Promise<TopicDetail> {
+  return api.post<TopicDetail>("/topics", body);
+}
+
+/** PUT /topics/{id} — replace a topic (admin). */
+export function updateTopic(id: string, body: TopicWrite): Promise<TopicDetail> {
+  return api.put<TopicDetail>(`/topics/${id}`, body);
+}
+
+/** DELETE /topics/{id} — delete a topic (admin; 204). */
+export function deleteTopic(id: string): Promise<void> {
+  return api.delete<void>(`/topics/${id}`);
 }

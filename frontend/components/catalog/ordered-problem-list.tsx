@@ -38,6 +38,8 @@ export interface OrderedProblemListProps<T extends OrderedProblem> {
     difficulty?: Difficulty;
     q?: string;
   }) => Promise<ListResult<T>>;
+  /** Optional trailing action rendered in the header (e.g. an admin "New" button). */
+  headerAction?: React.ReactNode;
 }
 
 export function OrderedProblemList<T extends OrderedProblem>({
@@ -46,6 +48,7 @@ export function OrderedProblemList<T extends OrderedProblem>({
   queryKey,
   hrefBase,
   fetcher,
+  headerAction,
 }: OrderedProblemListProps<T>) {
   const [page, setPage] = React.useState(1);
   const [searchInput, setSearchInput] = React.useState("");
@@ -77,9 +80,12 @@ export function OrderedProblemList<T extends OrderedProblem>({
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-h1">{title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+      <header className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-h1">{title}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        </div>
+        {headerAction}
       </header>
 
       <div className="flex flex-wrap items-end gap-3">

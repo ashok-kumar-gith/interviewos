@@ -17,6 +17,7 @@ import {
 } from "@/components/detail/detail-layout";
 import { getTopic, type TopicDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
+import { TopicAdminActions } from "@/components/authoring/admin-actions";
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: "Not started",
@@ -49,7 +50,10 @@ export default function TopicDetailPage({ params }: { params: Promise<{ id: stri
 
   return (
     <article className="space-y-6">
-      <BackLink href="/resources" label="Back to Resources" />
+      <div className="flex items-center justify-between gap-3">
+        <BackLink href="/resources" label="Back to Resources" />
+        <TopicAdminActions topic={t} queryKey={["topic", id]} backHref="/resources" />
+      </div>
 
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
