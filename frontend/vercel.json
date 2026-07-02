@@ -2,11 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://REPLACE_WITH_RENDER_HOST/api/:path*" },
-    { "source": "/healthz", "destination": "https://REPLACE_WITH_RENDER_HOST/healthz" },
-    { "source": "/readyz", "destination": "https://REPLACE_WITH_RENDER_HOST/readyz" },
-    { "source": "/swagger", "destination": "https://REPLACE_WITH_RENDER_HOST/swagger" },
-    { "source": "/swagger/:path*", "destination": "https://REPLACE_WITH_RENDER_HOST/swagger/:path*" },
-    { "source": "/metrics", "destination": "https://REPLACE_WITH_RENDER_HOST/metrics" }
+    { "source": "/api/:path*", "destination": "https://interviewos-api.onrender.com/api/:path*" },
+    { "source": "/healthz", "destination": "https://interviewos-api.onrender.com/healthz" },
+    { "source": "/readyz", "destination": "https://interviewos-api.onrender.com/readyz" },
+    { "source": "/swagger", "destination": "https://interviewos-api.onrender.com/swagger" },
+    { "source": "/swagger/:path*", "destination": "https://interviewos-api.onrender.com/swagger/:path*" },
+    { "source": "/metrics", "destination": "https://interviewos-api.onrender.com/metrics" }
   ]
 }

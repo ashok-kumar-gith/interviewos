@@ -31,8 +31,9 @@ COPY --from=builder /out/api /app/api
 COPY --from=builder /out/migrate /app/migrate
 COPY --from=builder /out/seed /app/seed
 
-# Ship the OpenAPI spec alongside the binary for the /swagger endpoint.
-COPY --from=builder /src/api/openapi.yaml /app/api/openapi.yaml
+# Note: the OpenAPI spec is embedded into the binary via //go:embed (api/embed.go),
+# so it does not need to be copied into the image — and copying it to /app/api/
+# would collide with the /app/api binary above (path is a file, not a directory).
 
 USER nonroot:nonroot
 EXPOSE 8080
