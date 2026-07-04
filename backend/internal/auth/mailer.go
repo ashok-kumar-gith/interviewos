@@ -1,10 +1,15 @@
 package auth
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/smtp"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -96,5 +101,76 @@ func (m *SMTPMailer) SendPasswordReset(_ context.Context, email, _ /*resetToken*
 		return fmt.Errorf("send password reset email: %w", err)
 	}
 	m.log.Info("password reset email sent", zap.String("to", email))
+	return nil
+}
+
+// ResendMailer delivers email through the Resend HTTP API (https://resend.com)
+// over port 443. Unlike raw SMTP, this works on hosts that block outbound SMTP
+// ports (e.g. Render's free tier).
+type ResendMailer struct {
+	apiKey string
+	from   string // e.g. "InterviewOS <onboarding@resend.dev>" or a verified-domain address
+	client *http.Client
+	log    *zap.Logger
+}
+
+// NewResendMailer constructs a ResendMailer. from is the sender; without a
+// verified domain Resend only permits "onboarding@resend.dev" (which can email
+// the account owner's own address).
+func NewResendMailer(apiKey, from string, log *zap.Logger) *ResendMailer {
+	if from == "" {
+		from = "InterviewOS <onboarding@resend.dev>"
+	}
+	return &ResendMailer{
+		apiKey: apiKey,
+		from:   from,
+		client: &http.Client{Timeout: 20 * time.Second},
+		log:    log,
+	}
+}
+
+// SendPasswordReset posts the reset email to the Resend API.
+func (m *ResendMailer) SendPasswordReset(ctx context.Context, email, _ /*resetToken*/, resetURL string) error {
+	payload := map[string]any{
+		"from":    m.from,
+		"to":      []string{email},
+		"subject": "Reset your InterviewOS password",
+		"text": strings.Join([]string{
+			"Hi,",
+			"",
+			"We received a request to reset your InterviewOS password.",
+			"Open the link below to choose a new password (it expires shortly):",
+			"",
+			resetURL,
+			"",
+			"If you didn't request this, you can safely ignore this email.",
+			"",
+			"— InterviewOS",
+		}, "\n"),
+	}
+	buf, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("resend: marshal payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(buf))
+	if err != nil {
+		return fmt.Errorf("resend: build request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+m.apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := m.client.Do(req)
+	if err != nil {
+		m.log.Error("password reset email failed to send", zap.String("to", email), zap.Error(err))
+		return fmt.Errorf("resend: send: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	if resp.StatusCode >= 300 {
+		m.log.Error("password reset email rejected by Resend",
+			zap.String("to", email), zap.Int("status", resp.StatusCode), zap.ByteString("body", body))
+		return fmt.Errorf("resend: status %d: %s", resp.StatusCode, string(body))
+	}
+	m.log.Info("password reset email sent via Resend", zap.String("to", email))
 	return nil
 }

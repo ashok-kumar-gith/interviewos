@@ -465,12 +465,17 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redi
 	// Send real email when SMTP is configured; otherwise log the reset link
 	// (local dev / unconfigured deploys).
 	var mailer auth.Mailer
-	if cfg.SMTPHost != "" {
+	switch {
+	case cfg.ResendAPIKey != "":
+		// Preferred on Render (HTTP/443; SMTP ports are blocked there).
+		mailer = auth.NewResendMailer(cfg.ResendAPIKey, cfg.ResendFrom, log)
+		log.Info("auth: Resend HTTP mailer enabled")
+	case cfg.SMTPHost != "":
 		mailer = auth.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom, log)
 		log.Info("auth: SMTP mailer enabled", zap.String("host", cfg.SMTPHost))
-	} else {
+	default:
 		mailer = auth.NewLogMailer(log)
-		log.Info("auth: SMTP not configured, using log mailer (reset links go to server logs)")
+		log.Info("auth: no mailer configured, using log mailer (reset links go to server logs)")
 	}
 	// No live OAuth credentials locally: register unconfigured providers so the
 	// callback route exists and returns a clear 501.

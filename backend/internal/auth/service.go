@@ -325,10 +325,18 @@ func (s *Service) ForgotPassword(ctx context.Context, email string, rc RequestCo
 	}
 
 	resetLink := fmt.Sprintf("%s?token=%s", s.resetURL, raw)
-	if err := s.mailer.SendPasswordReset(ctx, u.Email, raw, resetLink); err != nil {
-		// Log but do not surface to the caller (still return 2xx).
-		s.log.Error("auth: sending reset email", zap.Error(err))
-	}
+	// Deliver out of band: the token is already persisted, and the endpoint
+	// always returns 202, so a slow or unreachable mail provider must never block
+	// (or fail) the request. Use a detached context with its own timeout since
+	// the request context is cancelled the moment we return.
+	email2, link2, addr := u.Email, resetLink, raw
+	go func() {
+		sendCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := s.mailer.SendPasswordReset(sendCtx, email2, addr, link2); err != nil {
+			s.log.Error("auth: sending reset email", zap.Error(err))
+		}
+	}()
 
 	s.audit.Record(ctx, AuditEvent{
 		UserID:    &u.ID,

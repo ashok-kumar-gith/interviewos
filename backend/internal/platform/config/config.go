@@ -79,6 +79,13 @@ type Config struct {
 	SMTPPassword string
 	// SMTPFrom is the From address for outbound mail; defaults to SMTPUsername.
 	SMTPFrom string
+	// ResendAPIKey enables the Resend HTTP email API (https://resend.com). Preferred
+	// on hosts that block outbound SMTP ports (e.g. Render free tier). When set it
+	// takes precedence over SMTP.
+	ResendAPIKey string
+	// ResendFrom is the sender for Resend (e.g. "InterviewOS <onboarding@resend.dev>").
+	// Without a verified domain Resend only allows onboarding@resend.dev.
+	ResendFrom string
 }
 
 // MinBcryptCost is the floor enforced for password hashing (NFR-SEC). Lower
@@ -162,6 +169,8 @@ func Load() (*Config, error) {
 		SMTPUsername: strings.TrimSpace(v.GetString("SMTP_USERNAME")),
 		SMTPPassword: v.GetString("SMTP_PASSWORD"),
 		SMTPFrom:     strings.TrimSpace(v.GetString("SMTP_FROM")),
+		ResendAPIKey: strings.TrimSpace(v.GetString("RESEND_API_KEY")),
+		ResendFrom:   strings.TrimSpace(v.GetString("RESEND_FROM")),
 	}
 	if cfg.AppBaseURL == "" {
 		cfg.AppBaseURL = "http://localhost:3000"
