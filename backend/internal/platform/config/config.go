@@ -66,6 +66,19 @@ type Config struct {
 	// BcryptCost is the bcrypt work factor used when hashing new passwords. NFR-SEC
 	// mandates a minimum of 12; values below 12 are clamped up to 12. Default 12.
 	BcryptCost int
+	// AppBaseURL is the public base URL of the frontend (e.g.
+	// https://interviewos-app.vercel.app). Used to build absolute links in emails
+	// such as the password-reset link. Falls back to http://localhost:3000.
+	AppBaseURL string
+	// SMTP* configure outbound transactional email (password reset). When SMTPHost
+	// is empty the app logs the reset link instead of sending (LogMailer). Any
+	// standard SMTP relay works (Gmail/Brevo/SendGrid/Mailgun/SES) over STARTTLS.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	// SMTPFrom is the From address for outbound mail; defaults to SMTPUsername.
+	SMTPFrom string
 }
 
 // MinBcryptCost is the floor enforced for password hashing (NFR-SEC). Lower
@@ -105,6 +118,8 @@ func Load() (*Config, error) {
 	v.SetDefault("AUTH_RATE_LIMIT_PER_MIN", 10)
 	v.SetDefault("USER_RATE_LIMIT_PER_MIN", 120)
 	v.SetDefault("BCRYPT_COST", MinBcryptCost)
+	v.SetDefault("APP_BASE_URL", "http://localhost:3000")
+	v.SetDefault("SMTP_PORT", 587)
 
 	// Optional .env support for local dev. Missing file is not an error.
 	v.SetConfigName(".env")
@@ -140,6 +155,22 @@ func Load() (*Config, error) {
 		AuthRateLimitPerMin: v.GetInt("AUTH_RATE_LIMIT_PER_MIN"),
 		UserRateLimitPerMin: v.GetInt("USER_RATE_LIMIT_PER_MIN"),
 		BcryptCost:          v.GetInt("BCRYPT_COST"),
+
+		AppBaseURL:   strings.TrimRight(strings.TrimSpace(v.GetString("APP_BASE_URL")), "/"),
+		SMTPHost:     strings.TrimSpace(v.GetString("SMTP_HOST")),
+		SMTPPort:     v.GetInt("SMTP_PORT"),
+		SMTPUsername: strings.TrimSpace(v.GetString("SMTP_USERNAME")),
+		SMTPPassword: v.GetString("SMTP_PASSWORD"),
+		SMTPFrom:     strings.TrimSpace(v.GetString("SMTP_FROM")),
+	}
+	if cfg.AppBaseURL == "" {
+		cfg.AppBaseURL = "http://localhost:3000"
+	}
+	if cfg.SMTPPort <= 0 {
+		cfg.SMTPPort = 587
+	}
+	if cfg.SMTPFrom == "" {
+		cfg.SMTPFrom = cfg.SMTPUsername
 	}
 	if cfg.AIModel == "" {
 		cfg.AIModel = "claude-sonnet-4-6"

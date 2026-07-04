@@ -462,7 +462,16 @@ func buildTokenManager(cfg *config.Config) (*auth.TokenManager, error) {
 // and HTTP handler from configuration and the shared token manager.
 func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redis.Client, tokens *auth.TokenManager) *auth.Handler {
 	repo := auth.NewRepository(db)
-	mailer := auth.NewLogMailer(log)
+	// Send real email when SMTP is configured; otherwise log the reset link
+	// (local dev / unconfigured deploys).
+	var mailer auth.Mailer
+	if cfg.SMTPHost != "" {
+		mailer = auth.NewSMTPMailer(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword, cfg.SMTPFrom, log)
+		log.Info("auth: SMTP mailer enabled", zap.String("host", cfg.SMTPHost))
+	} else {
+		mailer = auth.NewLogMailer(log)
+		log.Info("auth: SMTP not configured, using log mailer (reset links go to server logs)")
+	}
 	// No live OAuth credentials locally: register unconfigured providers so the
 	// callback route exists and returns a clear 501.
 	oauthReg := auth.NewOAuthRegistry(
@@ -478,6 +487,7 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redi
 		Audit:      auth.NewAuditLogger(db, log),
 		Logger:     log,
 		BcryptCost: cfg.BcryptCost,
+		ResetURL:   cfg.AppBaseURL + "/reset-password",
 	})
 	// Stricter per-IP rate limit on credential-sensitive auth endpoints. Uses
 	// Redis when available (correct across replicas), in-memory otherwise.
