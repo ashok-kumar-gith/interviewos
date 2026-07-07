@@ -42,6 +42,34 @@ func (m *LogMailer) SendPasswordReset(_ context.Context, email, resetToken, rese
 	return nil
 }
 
+// AsyncMailer wraps a Mailer so SendPasswordReset dispatches in a detached
+// goroutine and returns immediately. This keeps the /forgot-password request
+// fast even when the underlying provider is slow or unreachable (the reset
+// token is already persisted before the mail is sent).
+type AsyncMailer struct {
+	inner Mailer
+	log   *zap.Logger
+}
+
+// NewAsyncMailer wraps inner for fire-and-forget delivery.
+func NewAsyncMailer(inner Mailer, log *zap.Logger) *AsyncMailer {
+	return &AsyncMailer{inner: inner, log: log}
+}
+
+// SendPasswordReset dispatches the send in the background and returns nil. The
+// request context is intentionally not used (it is cancelled once the handler
+// returns); a fresh bounded context governs the background send.
+func (m *AsyncMailer) SendPasswordReset(_ context.Context, email, resetToken, resetURL string) error {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+		defer cancel()
+		if err := m.inner.SendPasswordReset(ctx, email, resetToken, resetURL); err != nil {
+			m.log.Error("async password reset delivery failed", zap.String("to", email), zap.Error(err))
+		}
+	}()
+	return nil
+}
+
 // SMTPMailer delivers email through a standard SMTP relay over STARTTLS (port
 // 587). It works with any provider that accepts SMTP AUTH PLAIN — Gmail
 // (smtp.gmail.com), Brevo, SendGrid, Mailgun, SES, etc.

@@ -477,12 +477,26 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redi
 		mailer = auth.NewLogMailer(log)
 		log.Info("auth: no mailer configured, using log mailer (reset links go to server logs)")
 	}
-	// No live OAuth credentials locally: register unconfigured providers so the
-	// callback route exists and returns a clear 501.
-	oauthReg := auth.NewOAuthRegistry(
-		auth.NewUnconfiguredProvider(auth.ProviderGoogle),
-		auth.NewUnconfiguredProvider(auth.ProviderGitHub),
-	)
+	// Deliver out of band so a slow/unreachable provider never blocks the request.
+	mailer = auth.NewAsyncMailer(mailer, log)
+	// Register real providers when client credentials are present; otherwise a
+	// placeholder that returns a clear 501 so /start degrades gracefully. Redirect
+	// URIs are derived from AppBaseURL and must match the provider OAuth app.
+	oauthBase := cfg.AppBaseURL + "/api/v1/auth/oauth"
+	var googleProv, githubProv auth.OAuthProvider
+	if cfg.GoogleClientID != "" && cfg.GoogleClientSecret != "" {
+		googleProv = auth.NewGoogleProvider(cfg.GoogleClientID, cfg.GoogleClientSecret, oauthBase+"/google/callback")
+		log.Info("auth: Google OAuth configured")
+	} else {
+		googleProv = auth.NewUnconfiguredProvider(auth.ProviderGoogle)
+	}
+	if cfg.GitHubClientID != "" && cfg.GitHubClientSecret != "" {
+		githubProv = auth.NewGitHubProvider(cfg.GitHubClientID, cfg.GitHubClientSecret, oauthBase+"/github/callback")
+		log.Info("auth: GitHub OAuth configured")
+	} else {
+		githubProv = auth.NewUnconfiguredProvider(auth.ProviderGitHub)
+	}
+	oauthReg := auth.NewOAuthRegistry(googleProv, githubProv)
 	svc := auth.NewService(auth.ServiceConfig{
 		Repo:       repo,
 		Data:       auth.NewDataRepository(db),
@@ -503,5 +517,6 @@ func buildAuthModule(cfg *config.Config, log *zap.Logger, db *gorm.DB, rdb *redi
 		Tokens:        tokens,
 		SecureCookies: cfg.IsProduction(),
 		RateLimit:     authRL,
+		AppBaseURL:    cfg.AppBaseURL,
 	})
 }

@@ -86,6 +86,14 @@ type Config struct {
 	// ResendFrom is the sender for Resend (e.g. "InterviewOS <onboarding@resend.dev>").
 	// Without a verified domain Resend only allows onboarding@resend.dev.
 	ResendFrom string
+	// OAuth client credentials. When a provider's pair is empty it stays
+	// unconfigured (its /start returns 501). Redirect URIs are derived from
+	// AppBaseURL as {AppBaseURL}/api/v1/auth/oauth/{provider}/callback and must be
+	// registered on the provider's OAuth app.
+	GoogleClientID     string
+	GoogleClientSecret string
+	GitHubClientID     string
+	GitHubClientSecret string
 }
 
 // MinBcryptCost is the floor enforced for password hashing (NFR-SEC). Lower
@@ -171,6 +179,11 @@ func Load() (*Config, error) {
 		SMTPFrom:     strings.TrimSpace(v.GetString("SMTP_FROM")),
 		ResendAPIKey: strings.TrimSpace(v.GetString("RESEND_API_KEY")),
 		ResendFrom:   strings.TrimSpace(v.GetString("RESEND_FROM")),
+
+		GoogleClientID:     strings.TrimSpace(v.GetString("GOOGLE_CLIENT_ID")),
+		GoogleClientSecret: strings.TrimSpace(v.GetString("GOOGLE_CLIENT_SECRET")),
+		GitHubClientID:     strings.TrimSpace(v.GetString("GITHUB_CLIENT_ID")),
+		GitHubClientSecret: strings.TrimSpace(v.GetString("GITHUB_CLIENT_SECRET")),
 	}
 	if cfg.AppBaseURL == "" {
 		cfg.AppBaseURL = "http://localhost:3000"

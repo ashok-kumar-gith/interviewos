@@ -325,18 +325,13 @@ func (s *Service) ForgotPassword(ctx context.Context, email string, rc RequestCo
 	}
 
 	resetLink := fmt.Sprintf("%s?token=%s", s.resetURL, raw)
-	// Deliver out of band: the token is already persisted, and the endpoint
-	// always returns 202, so a slow or unreachable mail provider must never block
-	// (or fail) the request. Use a detached context with its own timeout since
-	// the request context is cancelled the moment we return.
-	email2, link2, addr := u.Email, resetLink, raw
-	go func() {
-		sendCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-		defer cancel()
-		if err := s.mailer.SendPasswordReset(sendCtx, email2, addr, link2); err != nil {
-			s.log.Error("auth: sending reset email", zap.Error(err))
-		}
-	}()
+	// The mailer may be an AsyncMailer in production (returns immediately, delivers
+	// out of band) so a slow/unreachable provider never blocks the request. In
+	// tests a synchronous fake mailer is injected, so the call is deterministic.
+	if err := s.mailer.SendPasswordReset(ctx, u.Email, raw, resetLink); err != nil {
+		// Log but do not surface to the caller (still return 2xx).
+		s.log.Error("auth: sending reset email", zap.Error(err))
+	}
 
 	s.audit.Record(ctx, AuditEvent{
 		UserID:    &u.ID,
@@ -468,7 +463,7 @@ func (s *Service) DeleteAccount(ctx context.Context, userID uuid.UUID, rc Reques
 // redirected to in order to begin the authorization-code flow. With no
 // configured credentials it returns ErrOAuthNotConfigured (→ 501) so the
 // frontend can show a clear "not available" message instead of a raw 404.
-func (s *Service) OAuthStart(providerName string) (string, error) {
+func (s *Service) OAuthStart(providerName, state string) (string, error) {
 	provider, err := s.oauth.Get(Provider(providerName))
 	if err != nil {
 		return "", err
@@ -476,11 +471,10 @@ func (s *Service) OAuthStart(providerName string) (string, error) {
 	if !provider.Configured() {
 		return "", ErrOAuthNotConfigured
 	}
-	// A configured provider would expose its authorization URL here. Real
-	// Google/GitHub providers implementing OAuthProvider supply it; until one is
-	// registered, Configured() is false and we never reach this branch.
-	if au, ok := provider.(interface{ AuthURL() string }); ok {
-		return au.AuthURL(), nil
+	// Configured Google/GitHub providers expose AuthCodeURL(state); the state is a
+	// CSRF token the handler also stores in a cookie and verifies on callback.
+	if au, ok := provider.(interface{ AuthCodeURL(string) string }); ok {
+		return au.AuthCodeURL(state), nil
 	}
 	return "", ErrOAuthNotConfigured
 }

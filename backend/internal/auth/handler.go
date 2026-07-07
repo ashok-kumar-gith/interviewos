@@ -3,6 +3,8 @@ package auth
 import (
 	"errors"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +15,11 @@ import (
 
 // refreshCookieName is the HttpOnly cookie carrying the refresh token.
 const refreshCookieName = "refresh_token"
+
+// oauthStateCookieName carries the CSRF state across the OAuth redirect round
+// trip. It must be SameSite=Lax so it survives the top-level cross-site
+// navigation back from the provider (Strict would be dropped).
+const oauthStateCookieName = "oauth_state"
 
 // Handler wires the auth HTTP endpoints to the service.
 type Handler struct {
@@ -25,6 +32,8 @@ type Handler struct {
 	// sensitive auth endpoints (register/login/forgot-password/reset-password).
 	// When nil, no rate limiting is applied.
 	rateLimit gin.HandlerFunc
+	// appBaseURL is the public frontend base URL; OAuth callbacks redirect here.
+	appBaseURL string
 }
 
 // HandlerConfig configures a Handler.
@@ -35,16 +44,24 @@ type HandlerConfig struct {
 	// RateLimit, when non-nil, is applied to the credential-sensitive endpoints
 	// to throttle brute-force and abuse from a single IP.
 	RateLimit gin.HandlerFunc
+	// AppBaseURL is the public frontend base URL; OAuth callbacks redirect the
+	// browser here after setting the session cookie (e.g. https://app.example.com).
+	AppBaseURL string
 }
 
 // NewHandler constructs a Handler.
 func NewHandler(cfg HandlerConfig) *Handler {
+	appBaseURL := strings.TrimRight(cfg.AppBaseURL, "/")
+	if appBaseURL == "" {
+		appBaseURL = "http://localhost:3000"
+	}
 	return &Handler{
 		svc:           cfg.Service,
 		tokens:        cfg.Tokens,
 		validate:      validator.New(validator.WithRequiredStructEnabled()),
 		secureCookies: cfg.SecureCookies,
 		rateLimit:     cfg.RateLimit,
+		appBaseURL:    appBaseURL,
 	}
 }
 
@@ -283,30 +300,70 @@ func (h *Handler) DeleteAccount(c *gin.Context) {
 // envelope instead of a raw 404, so the SPA can show a friendly message.
 func (h *Handler) OAuthStart(c *gin.Context) {
 	provider := c.Param("provider")
-	url, err := h.svc.OAuthStart(provider)
+	// Mint a CSRF state token, stash it in a Lax cookie, and pass it to the
+	// provider so we can verify it on the callback.
+	state, err := GenerateOpaqueToken()
+	if err != nil {
+		server.AbortError(c, http.StatusInternalServerError, server.CodeInternal, "could not start sign-in", nil)
+		return
+	}
+	authURL, err := h.svc.OAuthStart(provider, state)
 	if err != nil {
 		h.writeServiceError(c, err)
 		return
 	}
-	c.Redirect(http.StatusFound, url)
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oauthStateCookieName, state, 600, "/api/v1/auth", "", h.secureCookies, true)
+	c.Redirect(http.StatusFound, authURL)
 }
 
-// OAuthCallback handles GET /auth/oauth/:provider/callback.
+// OAuthCallback handles GET /auth/oauth/:provider/callback. It is reached by a
+// browser redirect from the provider, so on success it sets the refresh cookie
+// and redirects into the app (rather than returning JSON); on any failure it
+// redirects to the login page with an ?oauth_error marker.
 func (h *Handler) OAuthCallback(c *gin.Context) {
 	provider := c.Param("provider")
 	code := c.Query("code")
 	state := c.Query("state")
-	if code == "" || state == "" {
-		server.AbortError(c, http.StatusBadRequest, server.CodeBadRequest, "code and state are required", nil)
+
+	// If the provider reported an error (e.g. user denied), bounce to login.
+	if e := c.Query("error"); e != "" {
+		h.redirectOAuthError(c, e)
 		return
 	}
+	if code == "" || state == "" {
+		h.redirectOAuthError(c, "missing_code")
+		return
+	}
+	// Verify CSRF state against the cookie set in OAuthStart.
+	cookieState, _ := c.Cookie(oauthStateCookieName)
+	h.clearOAuthStateCookie(c)
+	if cookieState == "" || cookieState != state {
+		h.redirectOAuthError(c, "state_mismatch")
+		return
+	}
+
 	pair, err := h.svc.OAuthCallback(c.Request.Context(), provider, code, state, reqCtx(c))
 	if err != nil {
-		h.writeServiceError(c, err)
+		h.redirectOAuthError(c, "exchange_failed")
 		return
 	}
 	h.setRefreshCookie(c, pair)
-	c.JSON(http.StatusOK, h.tokenResponse(pair))
+	// Land on the dashboard; the SPA silently refreshes from the cookie, and a
+	// profile-less new account is guided to intake from there.
+	c.Redirect(http.StatusFound, h.appBaseURL+"/dashboard")
+}
+
+// redirectOAuthError sends the browser back to the login page with a marker the
+// SPA can surface as a friendly message.
+func (h *Handler) redirectOAuthError(c *gin.Context, reason string) {
+	c.Redirect(http.StatusFound, h.appBaseURL+"/login?oauth_error="+url.QueryEscape(reason))
+}
+
+// clearOAuthStateCookie expires the CSRF state cookie.
+func (h *Handler) clearOAuthStateCookie(c *gin.Context) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(oauthStateCookieName, "", -1, "/api/v1/auth", "", h.secureCookies, true)
 }
 
 // ---- helpers ----
