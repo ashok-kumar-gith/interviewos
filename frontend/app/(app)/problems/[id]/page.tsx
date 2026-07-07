@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, ExternalLink, Lightbulb, ListChecks, Shapes, Terminal, TriangleAlert } from "lucide-react";
+import { Building2, ExternalLink, Lightbulb, ListChecks, Shapes, Sparkles, Terminal, TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { DifficultyPill } from "@/components/ui/difficulty-pill";
@@ -18,6 +18,7 @@ import { ApiError } from "@/lib/api/client";
 import { ProblemProgressPanel } from "@/components/detail/problem-progress";
 import { CodeRunner } from "@/components/code/code-runner";
 import { ProblemAdminActions } from "@/components/authoring/admin-actions";
+import { AiReviewPanel } from "@/components/ai/ai-review-panel";
 import { CODE_RUNNER_ENABLED } from "@/lib/config";
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -103,6 +104,10 @@ export default function ProblemDetailPage({ params }: { params: Promise<{ id: st
           <CodeRunner />
         </DetailSection>
       )}
+
+      <DetailSection title="Review with AI" icon={Sparkles}>
+        <AiReviewPanel kind="code" problemTitle={p.title} prompt={p.prompt_summary} />
+      </DetailSection>
 
       <MarkdownSection title="Problem" icon={ListChecks} content={p.prompt_summary} />
       <MarkdownSection title="Approach" icon={Lightbulb} content={p.approach_md} />

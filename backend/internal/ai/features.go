@@ -426,6 +426,235 @@ func sdStructured(answer string) map[string]any {
 	}
 }
 
+// ---- Code review ----
+
+// CodeReviewInput carries a coding-solution review request. ProblemTitle/Prompt
+// are optional context supplied by the client (the problem the code solves).
+type CodeReviewInput struct {
+	Language     string
+	Code         string
+	ProblemTitle string
+	Prompt       string
+}
+
+// CodeReview critiques a candidate's coding solution. AI produces a structured
+// review; the fallback runs a deterministic rubric over the source.
+func (s *Service) CodeReview(ctx context.Context, userID uuid.UUID, in CodeReviewInput) (*TextResult, error) {
+	started := s.now()
+	system := "You are a staff engineer reviewing a candidate's coding-interview solution. Critique it on: " +
+		"correctness (does it solve the problem, off-by-one/edge cases), time & space complexity (Big-O, with " +
+		"justification), readability & naming, idiomatic style for the language, and concrete improvements. " +
+		"End with a one-line verdict (ship / needs work / incorrect). Be specific and concise; use markdown headings."
+	var b strings.Builder
+	if strings.TrimSpace(in.ProblemTitle) != "" {
+		fmt.Fprintf(&b, "Problem: %s\n", strings.TrimSpace(in.ProblemTitle))
+	}
+	if strings.TrimSpace(in.Prompt) != "" {
+		fmt.Fprintf(&b, "Prompt:\n%s\n\n", strings.TrimSpace(in.Prompt))
+	}
+	lang := strings.TrimSpace(in.Language)
+	if lang == "" {
+		lang = "text"
+	}
+	fmt.Fprintf(&b, "Language: %s\n\nCandidate solution:\n```%s\n%s\n```", lang, lang, strings.TrimSpace(in.Code))
+
+	if c := s.tryComplete(ctx, FeatureCodeReview, system, b.String()); c.ok {
+		id := s.record(ctx, userID, FeatureCodeReview, c, false, started, nil)
+		return &TextResult{Feature: FeatureCodeReview, Content: c.text, Model: s.modelPtr(false), UsedFallback: false, InvocationID: id}, nil
+	}
+	id := s.record(ctx, userID, FeatureCodeReview, completion{}, true, started, nil)
+	return &TextResult{Feature: FeatureCodeReview, Content: codeReviewFallback(in), Structured: codeStructured(in.Code), Model: nil, UsedFallback: true, InvocationID: id}, nil
+}
+
+// codeRubric is the deterministic code-review rubric: a label, signal keywords,
+// and a tip when the signal is absent.
+var codeRubric = []struct {
+	label    string
+	keywords []string
+	tip      string
+}{
+	{"Edge-case handling", []string{"if ", "empty", "null", "nil", "none", "== 0", "len(", ".length", "bounds", "guard"}, "Handle edge cases explicitly (empty input, single element, overflow, nulls)."},
+	{"Core algorithm", []string{"for ", "while ", "recursion", "recurse", "map[", "dict", "set(", "hashmap", "stack", "queue", "sort"}, "Show the core loop/recursion and the data structures backing your approach."},
+	{"Complexity noted", []string{"o(", "big-o", "complexity", "time:", "space:"}, "State the time and space complexity (Big-O) and justify it."},
+	{"Naming & readability", []string{"//", "#", "/*", "func ", "def ", "function ", "return"}, "Use clear names and small functions; add a comment for non-obvious steps."},
+	{"Testing / verification", []string{"test", "assert", "example", "expect", "print(", "console.log"}, "Walk through an example or add a quick test to verify correctness."},
+}
+
+func codeReviewFallback(in CodeReviewInput) string {
+	src := strings.ToLower(in.Code)
+	var b strings.Builder
+	b.WriteString("# Code review (rubric)\n\n")
+	if strings.TrimSpace(in.ProblemTitle) != "" {
+		fmt.Fprintf(&b, "Problem: **%s**\n\n", strings.TrimSpace(in.ProblemTitle))
+	}
+	if strings.TrimSpace(in.Code) == "" {
+		b.WriteString("> No code submitted — paste your solution and run the review again.\n")
+		return b.String()
+	}
+	covered, missing := 0, []string{}
+	b.WriteString("## Coverage\n")
+	for _, r := range codeRubric {
+		hit := false
+		for _, kw := range r.keywords {
+			if strings.Contains(src, kw) {
+				hit = true
+				break
+			}
+		}
+		if hit {
+			covered++
+			fmt.Fprintf(&b, "- ✓ %s\n", r.label)
+		} else {
+			missing = append(missing, r.tip)
+			fmt.Fprintf(&b, "- ✗ %s — not evident.\n", r.label)
+		}
+	}
+	lines := strings.Count(in.Code, "\n") + 1
+	fmt.Fprintf(&b, "\n**Rubric coverage: %d%% (%d/%d) · %d lines.**\n",
+		int(float64(covered)/float64(len(codeRubric))*100), covered, len(codeRubric), lines)
+	if len(missing) > 0 {
+		b.WriteString("\n## Recommendations\n")
+		for _, m := range missing {
+			fmt.Fprintf(&b, "- %s\n", m)
+		}
+	}
+	b.WriteString("\n> This is a deterministic rubric review. Enable AI (set ANTHROPIC_API_KEY) for a full line-by-line critique.\n")
+	return b.String()
+}
+
+func codeStructured(code string) map[string]any {
+	src := strings.ToLower(code)
+	covered := 0
+	dims := map[string]bool{}
+	for _, r := range codeRubric {
+		hit := false
+		for _, kw := range r.keywords {
+			if strings.Contains(src, kw) {
+				hit = true
+				break
+			}
+		}
+		dims[r.label] = hit
+		if hit {
+			covered++
+		}
+	}
+	return map[string]any{
+		"rubric_coverage_pct": int(float64(covered) / float64(len(codeRubric)) * 100),
+		"dimensions":          dims,
+		"line_count":          strings.Count(code, "\n") + 1,
+	}
+}
+
+// ---- LLD review ----
+
+// LLDReviewInput carries a low-level-design (OOD) review request.
+type LLDReviewInput struct {
+	ProblemTitle string
+	Prompt       string
+	AnswerMD     string
+}
+
+// LLDReview critiques a candidate's low-level/object-oriented design.
+func (s *Service) LLDReview(ctx context.Context, userID uuid.UUID, in LLDReviewInput) (*TextResult, error) {
+	started := s.now()
+	system := "You are a senior engineer reviewing a candidate's low-level (object-oriented) design. Critique it on: " +
+		"class/entity modeling, responsibilities & SOLID principles, appropriate design patterns, relationships " +
+		"(composition vs inheritance), extensibility, and concurrency/edge cases. Point out what's missing and " +
+		"suggest concrete improvements. End with a verdict. Concise markdown with headings."
+	var b strings.Builder
+	if strings.TrimSpace(in.ProblemTitle) != "" {
+		fmt.Fprintf(&b, "LLD problem: %s\n", strings.TrimSpace(in.ProblemTitle))
+	}
+	if strings.TrimSpace(in.Prompt) != "" {
+		fmt.Fprintf(&b, "Requirements:\n%s\n\n", strings.TrimSpace(in.Prompt))
+	}
+	fmt.Fprintf(&b, "Candidate design:\n%s", strings.TrimSpace(in.AnswerMD))
+
+	if c := s.tryComplete(ctx, FeatureLLDReview, system, b.String()); c.ok {
+		id := s.record(ctx, userID, FeatureLLDReview, c, false, started, nil)
+		return &TextResult{Feature: FeatureLLDReview, Content: c.text, Model: s.modelPtr(false), UsedFallback: false, InvocationID: id}, nil
+	}
+	id := s.record(ctx, userID, FeatureLLDReview, completion{}, true, started, nil)
+	return &TextResult{Feature: FeatureLLDReview, Content: lldReviewFallback(in), Structured: lldStructured(in.AnswerMD), Model: nil, UsedFallback: true, InvocationID: id}, nil
+}
+
+var lldRubric = []struct {
+	label    string
+	keywords []string
+	tip      string
+}{
+	{"Classes & entities", []string{"class", "entity", "object", "struct", "interface"}, "Identify the core classes/entities and their attributes."},
+	{"Responsibilities & SOLID", []string{"responsib", "single responsibility", "solid", "srp", "open/closed", "encapsulat"}, "Give each class one clear responsibility; note the SOLID principles you apply."},
+	{"Design patterns", []string{"factory", "singleton", "strategy", "observer", "builder", "adapter", "decorator", "state", "command", "pattern"}, "Use appropriate design patterns (e.g. factory, strategy, observer) and say why."},
+	{"Relationships", []string{"composition", "aggregation", "inheritance", "extends", "implements", "has-a", "is-a", "association"}, "Model relationships (composition vs inheritance, associations) explicitly."},
+	{"Extensibility & concurrency", []string{"extensib", "scal", "thread", "concurren", "lock", "synchroniz", "future"}, "Discuss extensibility and any concurrency/thread-safety concerns."},
+}
+
+func lldReviewFallback(in LLDReviewInput) string {
+	a := strings.ToLower(in.AnswerMD)
+	var b strings.Builder
+	b.WriteString("# Low-level design review (rubric)\n\n")
+	if strings.TrimSpace(in.ProblemTitle) != "" {
+		fmt.Fprintf(&b, "Problem: **%s**\n\n", strings.TrimSpace(in.ProblemTitle))
+	}
+	if strings.TrimSpace(in.AnswerMD) == "" {
+		b.WriteString("> No design submitted — write out your classes and relationships, then run the review again.\n")
+		return b.String()
+	}
+	covered, missing := 0, []string{}
+	b.WriteString("## Coverage\n")
+	for _, r := range lldRubric {
+		hit := false
+		for _, kw := range r.keywords {
+			if strings.Contains(a, kw) {
+				hit = true
+				break
+			}
+		}
+		if hit {
+			covered++
+			fmt.Fprintf(&b, "- ✓ %s\n", r.label)
+		} else {
+			missing = append(missing, r.tip)
+			fmt.Fprintf(&b, "- ✗ %s — not clearly addressed.\n", r.label)
+		}
+	}
+	fmt.Fprintf(&b, "\n**Rubric coverage: %d%% (%d/%d dimensions).**\n",
+		int(float64(covered)/float64(len(lldRubric))*100), covered, len(lldRubric))
+	if len(missing) > 0 {
+		b.WriteString("\n## Recommendations\n")
+		for _, m := range missing {
+			fmt.Fprintf(&b, "- %s\n", m)
+		}
+	}
+	b.WriteString("\n> This is a deterministic rubric review. Enable AI (set ANTHROPIC_API_KEY) for a full design critique.\n")
+	return b.String()
+}
+
+func lldStructured(answer string) map[string]any {
+	a := strings.ToLower(answer)
+	covered := 0
+	dims := map[string]bool{}
+	for _, r := range lldRubric {
+		hit := false
+		for _, kw := range r.keywords {
+			if strings.Contains(a, kw) {
+				hit = true
+				break
+			}
+		}
+		dims[r.label] = hit
+		if hit {
+			covered++
+		}
+	}
+	return map[string]any{
+		"rubric_coverage_pct": int(float64(covered) / float64(len(lldRubric)) * 100),
+		"dimensions":          dims,
+	}
+}
+
 // ---- Story improve ----
 
 // StoryImproveInput carries the AIStoryImproveRequest (by id or inline STAR).

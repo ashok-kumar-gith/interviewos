@@ -41,6 +41,8 @@ func (h *Handler) RegisterRoutes(v1 *gin.RouterGroup) {
 		g.POST("/weakness-detect", h.WeaknessDetect)
 		g.POST("/daily-plan", h.DailyPlan)
 		g.POST("/sd-review", h.SDReview)
+		g.POST("/code-review", h.CodeReview)
+		g.POST("/lld-review", h.LLDReview)
 	}
 }
 
@@ -81,6 +83,19 @@ type dailyPlanRequest struct {
 type sdReviewRequest struct {
 	DesignProblemID string `json:"design_problem_id"`
 	AnswerMD        string `json:"answer_md"`
+}
+
+type codeReviewRequest struct {
+	Language     string `json:"language"`
+	Code         string `json:"code"`
+	ProblemTitle string `json:"problem_title"`
+	Prompt       string `json:"prompt"`
+}
+
+type lldReviewRequest struct {
+	ProblemTitle string `json:"problem_title"`
+	Prompt       string `json:"prompt"`
+	AnswerMD     string `json:"answer_md"`
 }
 
 type improvedSTAR struct {
@@ -285,6 +300,48 @@ func (h *Handler) SDReview(c *gin.Context) {
 		return
 	}
 	res, err := h.svc.SDReview(c.Request.Context(), uid, SDReviewInput{DesignProblemID: pid, AnswerMD: req.AnswerMD})
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAIResponse(res))
+}
+
+// CodeReview handles POST /ai/code-review.
+func (h *Handler) CodeReview(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	var req codeReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Code == "" {
+		server.AbortError(c, http.StatusUnprocessableEntity, server.CodeValidationError, "code is required", nil)
+		return
+	}
+	res, err := h.svc.CodeReview(c.Request.Context(), uid, CodeReviewInput{
+		Language: req.Language, Code: req.Code, ProblemTitle: req.ProblemTitle, Prompt: req.Prompt,
+	})
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toAIResponse(res))
+}
+
+// LLDReview handles POST /ai/lld-review.
+func (h *Handler) LLDReview(c *gin.Context) {
+	uid, ok := h.userID(c)
+	if !ok {
+		return
+	}
+	var req lldReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.AnswerMD == "" {
+		server.AbortError(c, http.StatusUnprocessableEntity, server.CodeValidationError, "answer_md is required", nil)
+		return
+	}
+	res, err := h.svc.LLDReview(c.Request.Context(), uid, LLDReviewInput{
+		ProblemTitle: req.ProblemTitle, Prompt: req.Prompt, AnswerMD: req.AnswerMD,
+	})
 	if err != nil {
 		h.writeError(c, err)
 		return

@@ -17,6 +17,8 @@ const (
 	FeatureWeaknessDetect Feature = "weakness_detect"
 	FeatureDailyPlan      Feature = "daily_plan"
 	FeatureSDReview       Feature = "sd_review"
+	FeatureCodeReview     Feature = "code_review"
+	FeatureLLDReview      Feature = "lld_review"
 )
 
 // Status enumerates the ai_invocation_status Postgres enum values.

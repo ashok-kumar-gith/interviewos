@@ -16,7 +16,9 @@ export type AIFeature =
   | "story_improve"
   | "weakness_detect"
   | "daily_plan"
-  | "sd_review";
+  | "sd_review"
+  | "code_review"
+  | "lld_review";
 
 export interface AIResponse {
   feature: AIFeature;
@@ -90,4 +92,27 @@ export function aiDailyPlan(body: AIDailyPlanRequest = {}): Promise<AIResponse> 
 /** POST /ai/sd-review — AI system-design review of a user's design answer. */
 export function aiSdReview(body: AISdReviewRequest): Promise<AIResponse> {
   return api.post<AIResponse>("/ai/sd-review", body);
+}
+
+export interface AICodeReviewRequest {
+  code: string;
+  language?: string;
+  problem_title?: string;
+  prompt?: string;
+}
+
+/** POST /ai/code-review — AI review of a coding solution. */
+export function aiCodeReview(body: AICodeReviewRequest): Promise<AIResponse> {
+  return api.post<AIResponse>("/ai/code-review", body);
+}
+
+export interface AILldReviewRequest {
+  answer_md: string;
+  problem_title?: string;
+  prompt?: string;
+}
+
+/** POST /ai/lld-review — AI review of a low-level (OOD) design. */
+export function aiLldReview(body: AILldReviewRequest): Promise<AIResponse> {
+  return api.post<AIResponse>("/ai/lld-review", body);
 }

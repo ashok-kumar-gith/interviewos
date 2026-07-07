@@ -25,6 +25,8 @@ import {
 import { getLLDProblem, type LLDProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
 import { LLDProblemAdminActions } from "@/components/authoring/admin-actions";
+import { AiReviewPanel } from "@/components/ai/ai-review-panel";
+import { Sparkles } from "lucide-react";
 
 /** Strip a fenced ``` wrapper if the diagram is already fenced. */
 function unfence(md: string): string {
@@ -68,6 +70,10 @@ export default function LLDProblemDetailPage({ params }: { params: Promise<{ id:
 
       <MarkdownSection title="Requirements" icon={ListChecks} content={l.requirements_md} />
       <MarkdownSection title="Entities" icon={Boxes} content={l.entities_md} />
+
+      <DetailSection title="Review with AI" icon={Sparkles}>
+        <AiReviewPanel kind="lld" problemTitle={l.title} prompt={l.requirements_md} />
+      </DetailSection>
 
       {l.design_patterns && l.design_patterns.length > 0 && (
         <DetailSection title="Design patterns" icon={Shapes}>

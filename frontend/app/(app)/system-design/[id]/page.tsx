@@ -30,6 +30,8 @@ import { getDesignProblem, type DesignProblemDetail } from "@/lib/api/content";
 import { ApiError } from "@/lib/api/client";
 import { DesignProblemProgressCard } from "@/components/detail/design-problem-progress";
 import { DesignProblemAdminActions } from "@/components/authoring/admin-actions";
+import { AiReviewPanel } from "@/components/ai/ai-review-panel";
+import { Sparkles } from "lucide-react";
 
 export default function DesignProblemDetailPage({
   params,
@@ -70,6 +72,10 @@ export default function DesignProblemDetailPage({
       </header>
 
       <DesignProblemProgressCard id={id} />
+
+      <DetailSection title="Review with AI" icon={Sparkles}>
+        <AiReviewPanel kind="sd" designProblemId={id} problemTitle={d.title} />
+      </DetailSection>
 
       <MarkdownSection title="Requirements" icon={ListChecks} content={d.requirements_md} />
       <MarkdownSection
