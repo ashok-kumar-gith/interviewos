@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -466,83 +467,154 @@ func (s *Service) CodeReview(ctx context.Context, userID uuid.UUID, in CodeRevie
 	return &TextResult{Feature: FeatureCodeReview, Content: codeReviewFallback(in), Structured: codeStructured(in.Code), Model: nil, UsedFallback: true, InvocationID: id}, nil
 }
 
-// codeRubric is the deterministic code-review rubric: a label, signal keywords,
-// and a tip when the signal is absent.
-var codeRubric = []struct {
-	label    string
-	keywords []string
-	tip      string
-}{
-	{"Edge-case handling", []string{"if ", "empty", "null", "nil", "none", "== 0", "len(", ".length", "bounds", "guard"}, "Handle edge cases explicitly (empty input, single element, overflow, nulls)."},
-	{"Core algorithm", []string{"for ", "while ", "recursion", "recurse", "map[", "dict", "set(", "hashmap", "stack", "queue", "sort"}, "Show the core loop/recursion and the data structures backing your approach."},
-	{"Complexity noted", []string{"o(", "big-o", "complexity", "time:", "space:"}, "State the time and space complexity (Big-O) and justify it."},
-	{"Naming & readability", []string{"//", "#", "/*", "func ", "def ", "function ", "return"}, "Use clear names and small functions; add a comment for non-obvious steps."},
-	{"Testing / verification", []string{"test", "assert", "example", "expect", "print(", "console.log"}, "Walk through an example or add a quick test to verify correctness."},
+// Language-aware detectors for the deterministic code reviewer. Word boundaries
+// avoid false negatives (e.g. `for(`, `for i`) and false positives (`before`).
+var (
+	reLoop        = regexp.MustCompile(`(?i)(\bfor\b|\bwhile\b|\bforeach\b|\bloop\b|\.map\s*\(|\.forEach\s*\(|\.filter\s*\(|\.reduce\s*\(|\bfor\s+\w+\s+in\b)`)
+	reDataStruct  = regexp.MustCompile(`(?i)(\bmap\b|\bdict\b|defaultdict|\bcounter\b|\bset\b|\blist\b|\barray\b|hash\s*map|hashtable|\bvector\b|\bstack\b|\bqueue\b|\bdeque\b|\bheap\b|\btree\b|\bgraph\b|\bslice\b|\[\]|\{\})`)
+	reComplexity  = regexp.MustCompile(`(?i)(O\s*\(\s*[0-9a-z^!*+ ]+\)|\btime\s*complexity\b|\bspace\s*complexity\b|\bbig[\s-]?o\b|amortized)`)
+	reEdge        = regexp.MustCompile(`(?i)(\bempty\b|\bnull\b|\bnil\b|\bnone\b|==\s*0|===\s*0|<\s*0|<=\s*0|\blen\s*\(|\.length\b|\.size\s*\(|\bisEmpty\b|\bbounds\b|out of range|\btry\b|\bcatch\b|\bexcept\b)`)
+	reBranch      = regexp.MustCompile(`(?i)(\bif\b|\bguard\b|\bswitch\b|\bmatch\b|\bassert\b)`)
+	reTest        = regexp.MustCompile(`(?i)(\btest\w*\b|\bassert\w*\b|\bexpect\s*\(|\bexample\b|\bprint\s*\(|console\.log|fmt\.Print|System\.out|\bmain\s*\()`)
+	reFuncDef     = regexp.MustCompile(`(?i)(?:func|def|function|fn)\s+([A-Za-z_]\w*)`)
+	reLineComment = regexp.MustCompile(`(?m)(^|\s)(//|#|--)\s`)
+)
+
+// codeSignals is the result of statically scanning a solution.
+type codeSignals struct {
+	hasEdge, hasAlgo, hasComplexity, hasReadable, hasTesting bool
+	hasLoop, hasRecursion, hasDataStruct                     bool
+	loopCount, lines                                         int
+}
+
+func analyzeCode(code string) codeSignals {
+	s := codeSignals{lines: strings.Count(code, "\n") + 1}
+	s.hasLoop = reLoop.MatchString(code)
+	s.loopCount = len(reLoop.FindAllString(code, -1))
+	s.hasDataStruct = reDataStruct.MatchString(code)
+	// Recursion: a defined function whose name is referenced again in the source.
+	for _, m := range reFuncDef.FindAllStringSubmatch(code, -1) {
+		if name := m[1]; name != "" && strings.Count(code, name) >= 2 {
+			s.hasRecursion = true
+			break
+		}
+	}
+	s.hasAlgo = s.hasLoop || s.hasRecursion || s.hasDataStruct
+	s.hasComplexity = reComplexity.MatchString(code)
+	s.hasEdge = reEdge.MatchString(code) && reBranch.MatchString(code)
+	s.hasReadable = reLineComment.MatchString(code) || len(reFuncDef.FindAllString(code, -1)) > 0
+	s.hasTesting = reTest.MatchString(code)
+	return s
+}
+
+// complexityHint gives a rough Big-O read from the loop structure.
+func complexityHint(s codeSignals) string {
+	switch {
+	case s.loopCount >= 2:
+		return "Multiple loops detected — check whether they're nested (typically O(n²) or worse) or sequential (O(n))."
+	case s.loopCount == 1:
+		return "A single loop suggests roughly O(n) time — confirm and state it explicitly."
+	case s.hasRecursion:
+		return "Recursion detected — derive the recurrence for time, and remember recursion uses O(depth) stack space."
+	default:
+		return "No explicit loop or recursion detected — if this is O(1) constant work, say so."
+	}
 }
 
 func codeReviewFallback(in CodeReviewInput) string {
-	src := strings.ToLower(in.Code)
 	var b strings.Builder
-	b.WriteString("# Code review (rubric)\n\n")
-	if strings.TrimSpace(in.ProblemTitle) != "" {
-		fmt.Fprintf(&b, "Problem: **%s**\n\n", strings.TrimSpace(in.ProblemTitle))
+	b.WriteString("# Code review (static analysis)\n\n")
+	if t := strings.TrimSpace(in.ProblemTitle); t != "" {
+		fmt.Fprintf(&b, "Problem: **%s**", t)
+		if l := strings.TrimSpace(in.Language); l != "" {
+			fmt.Fprintf(&b, " · %s", l)
+		}
+		b.WriteString("\n\n")
 	}
 	if strings.TrimSpace(in.Code) == "" {
 		b.WriteString("> No code submitted — paste your solution and run the review again.\n")
 		return b.String()
 	}
+
+	s := analyzeCode(in.Code)
+	type row struct {
+		label string
+		ok    bool
+		tip   string
+	}
+	rows := []row{
+		{"Core algorithm", s.hasAlgo, "Make the core loop/recursion and the backing data structures explicit."},
+		{"Edge-case handling", s.hasEdge, "Guard edge cases explicitly (empty/single input, bounds, overflow, nulls)."},
+		{"Complexity stated", s.hasComplexity, "State the time and space complexity (Big-O) and justify it in a comment."},
+		{"Readability", s.hasReadable, "Use clear names, small functions, and a comment for any non-obvious step."},
+		{"Testing / verification", s.hasTesting, "Add a quick test or walk through an example to show it's correct."},
+	}
 	covered, missing := 0, []string{}
-	b.WriteString("## Coverage\n")
-	for _, r := range codeRubric {
-		hit := false
-		for _, kw := range r.keywords {
-			if strings.Contains(src, kw) {
-				hit = true
-				break
-			}
-		}
-		if hit {
+	b.WriteString("## What the analyzer found\n")
+	for _, r := range rows {
+		if r.ok {
 			covered++
 			fmt.Fprintf(&b, "- ✓ %s\n", r.label)
 		} else {
 			missing = append(missing, r.tip)
-			fmt.Fprintf(&b, "- ✗ %s — not evident.\n", r.label)
+			fmt.Fprintf(&b, "- ✗ %s\n", r.label)
 		}
 	}
-	lines := strings.Count(in.Code, "\n") + 1
-	fmt.Fprintf(&b, "\n**Rubric coverage: %d%% (%d/%d) · %d lines.**\n",
-		int(float64(covered)/float64(len(codeRubric))*100), covered, len(codeRubric), lines)
+
+	// Signal detail so the ✓/✗ verdicts are transparent, not opaque.
+	detected := []string{}
+	if s.hasLoop {
+		detected = append(detected, fmt.Sprintf("%d loop(s)", s.loopCount))
+	}
+	if s.hasRecursion {
+		detected = append(detected, "recursion")
+	}
+	if s.hasDataStruct {
+		detected = append(detected, "data structure(s)")
+	}
+	if len(detected) == 0 {
+		detected = append(detected, "no loops/recursion/data-structures")
+	}
+	fmt.Fprintf(&b, "\n**Coverage: %d%% (%d/5) · %d lines · detected: %s.**\n",
+		covered*20, covered, s.lines, strings.Join(detected, ", "))
+
+	fmt.Fprintf(&b, "\n## Complexity\n%s\n", complexityHint(s))
+
 	if len(missing) > 0 {
 		b.WriteString("\n## Recommendations\n")
 		for _, m := range missing {
 			fmt.Fprintf(&b, "- %s\n", m)
 		}
+	} else {
+		b.WriteString("\nSolid coverage across the rubric — rehearse explaining your approach and complexity aloud.\n")
 	}
-	b.WriteString("\n> This is a deterministic rubric review. Enable AI (set ANTHROPIC_API_KEY) for a full line-by-line critique.\n")
+	b.WriteString("\n> Static-analysis review (no API cost). Enable AI (set ANTHROPIC_API_KEY) for a full line-by-line critique.\n")
 	return b.String()
 }
 
 func codeStructured(code string) map[string]any {
-	src := strings.ToLower(code)
+	s := analyzeCode(code)
 	covered := 0
-	dims := map[string]bool{}
-	for _, r := range codeRubric {
-		hit := false
-		for _, kw := range r.keywords {
-			if strings.Contains(src, kw) {
-				hit = true
-				break
-			}
-		}
-		dims[r.label] = hit
-		if hit {
+	for _, ok := range []bool{s.hasAlgo, s.hasEdge, s.hasComplexity, s.hasReadable, s.hasTesting} {
+		if ok {
 			covered++
 		}
 	}
 	return map[string]any{
-		"rubric_coverage_pct": int(float64(covered) / float64(len(codeRubric)) * 100),
-		"dimensions":          dims,
-		"line_count":          strings.Count(code, "\n") + 1,
+		"rubric_coverage_pct": covered * 20,
+		"dimensions": map[string]bool{
+			"Core algorithm":         s.hasAlgo,
+			"Edge-case handling":     s.hasEdge,
+			"Complexity stated":      s.hasComplexity,
+			"Readability":            s.hasReadable,
+			"Testing / verification": s.hasTesting,
+		},
+		"detected": map[string]any{
+			"loops":        s.loopCount,
+			"recursion":    s.hasRecursion,
+			"data_structs": s.hasDataStruct,
+		},
+		"line_count": s.lines,
 	}
 }
 
